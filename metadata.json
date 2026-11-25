@@ -1,0 +1,8 @@
+{
+  "name": "Kelsa Mitra - Voice-First Job Matching Tumakuru",
+  "description": "Zero-typing, voice-first hyper-local job matching platform for informal workers, semi-skilled tradespeople, and local employers in Tumakuru Town & Industrial Belt.",
+  "capabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ],
+  "permissions": []
+}

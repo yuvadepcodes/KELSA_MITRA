@@ -1,0 +1,32 @@
+@import "tailwindcss";
+
+@layer base {
+  body {
+    background-color: #FAF8F5;
+    color: #14171A;
+    font-family: 'Plus Jakarta Sans', 'Noto Sans Kannada', sans-serif;
+  }
+}
+
+/* Custom scrollbar for clean UI */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #f1edeb;
+}
+::-webkit-scrollbar-thumb {
+  background: #d4cfcc;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #b5ada8;
+}
+
+/* Keep Leaflet controls cleanly beneath sticky header & drawers */
+.leaflet-container {
+  z-index: 1 !important;
+  font-family: 'Plus Jakarta Sans', 'Noto Sans Kannada', sans-serif;
+}
+

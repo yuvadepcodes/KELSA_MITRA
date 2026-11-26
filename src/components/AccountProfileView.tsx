@@ -18,6 +18,7 @@ import {
 import { SupportedLang } from '../services/voiceService';
 import { UserAccount } from '../services/supabaseService';
 import { Job, ShiftApplication } from '../services/jobService';
+import { getBrandParts, localizeDisplayName } from '../utils/transliterate';
 
 interface AccountProfileViewProps {
   lang: SupportedLang;
@@ -76,14 +77,22 @@ export default function AccountProfileView({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [savedNotice, setSavedNotice] = useState(false);
+  const [nameEdited, setNameEdited] = useState(false);
+  const [tradeEdited, setTradeEdited] = useState(false);
+
+  const brand = getBrandParts(lang);
 
   useEffect(() => {
+    setNameEdited(false);
+    setTradeEdited(false);
     if (currentUser) {
       setRole(currentUser.role);
-      setName(currentUser.name);
+      setName(localizeDisplayName(currentUser.name, lang));
       setPhone(currentUser.phone);
       setArea((currentUser.area || 'B.H. Road').replace(/,\s*Tumakuru/gi, '').trim());
-      setTradeOrBusiness(currentUser.tradeOrBusiness || '');
+      setTradeOrBusiness(
+        currentUser.tradeOrBusiness ? localizeDisplayName(currentUser.tradeOrBusiness, lang) : ''
+      );
       setJobsCompleted(
         currentUser.jobsCompleted !== undefined
           ? currentUser.jobsCompleted
@@ -106,6 +115,17 @@ export default function AccountProfileView({
       setPaymentPreference('Evening UPI');
     }
   }, [currentUser, activeRole, postedJobsCount]);
+
+  useEffect(() => {
+    if (currentUser) {
+      if (!nameEdited) {
+        setName(localizeDisplayName(currentUser.name, lang));
+      }
+      if (!tradeEdited && currentUser.tradeOrBusiness) {
+        setTradeOrBusiness(localizeDisplayName(currentUser.tradeOrBusiness, lang));
+      }
+    }
+  }, [lang, currentUser, nameEdited, tradeEdited]);
 
   const totalJobsCount =
     role === 'worker'
@@ -135,11 +155,14 @@ export default function AccountProfileView({
     setSavedNotice(false);
     try {
       await onSaveAccount({
-        name: name.trim(),
+        name: !nameEdited && currentUser?.name ? currentUser.name : name.trim(),
         phone: digits,
         role,
         area,
-        tradeOrBusiness: tradeOrBusiness.trim(),
+        tradeOrBusiness:
+          !tradeEdited && currentUser?.tradeOrBusiness
+            ? currentUser.tradeOrBusiness
+            : tradeOrBusiness.trim(),
         jobsCompleted: Number(jobsCompleted) || 0,
         experience: experience.trim(),
         expectedWage: Number(expectedWage) || 700,
@@ -168,7 +191,13 @@ export default function AccountProfileView({
             <div>
               <div className="flex flex-wrap items-center gap-2">
                 <h2 className="text-lg sm:text-xl font-extrabold text-[#14171A]">
-                  {currentUser?.name || (lang === 'kn' ? 'ಹೊಸ ಖಾತೆ' : 'Your KELSAಮಿತ್ರ Profile')}
+                  {currentUser?.name
+                    ? localizeDisplayName(currentUser.name, lang)
+                    : lang === 'kn'
+                    ? 'ಹೊಸ ಖಾತೆ'
+                    : lang === 'hi'
+                    ? `आपका ${brand.full} प्रोफ़ाइल`
+                    : `Your ${brand.full} Profile`}
                 </h2>
                 <span
                   className={`text-[11px] font-extrabold px-2.5 py-0.5 rounded-lg ${
@@ -180,9 +209,13 @@ export default function AccountProfileView({
                   {role === 'employer'
                     ? lang === 'kn'
                       ? 'ಉದ್ಯೋಗದಾತರು (Employer)'
+                      : lang === 'hi'
+                      ? 'नियोक्ता (Employer)'
                       : 'Employer'
                     : lang === 'kn'
                     ? 'ಕೆಲಸಗಾರರು (Worker)'
+                    : lang === 'hi'
+                    ? 'कामगार (Worker)'
                     : 'Worker'}
                 </span>
               </div>
@@ -199,7 +232,7 @@ export default function AccountProfileView({
                 )}
                 <span className="inline-flex items-center gap-1">
                   <MapPin className="w-3 h-3 text-[#EA580C]" />
-                  {area}
+                  {localizeDisplayName(area, lang)}
                 </span>
               </div>
             </div>
@@ -331,7 +364,10 @@ export default function AccountProfileView({
                 <input
                   type="text"
                   value={name}
-                  onChange={(e) => setName(e.target.value)}
+                  onChange={(e) => {
+                    setNameEdited(true);
+                    setName(e.target.value);
+                  }}
                   placeholder="e.g. Ramesh Kumar / Sri Vinayaka Works"
                   className="w-full min-h-[44px] px-3.5 bg-[#FAF8F5] border border-stone-200 rounded-xl text-sm font-medium focus:outline-none focus:ring-2 focus:ring-amber-500 focus:bg-white"
                 />
@@ -361,7 +397,10 @@ export default function AccountProfileView({
                 <input
                   type="text"
                   value={tradeOrBusiness}
-                  onChange={(e) => setTradeOrBusiness(e.target.value)}
+                  onChange={(e) => {
+                    setTradeEdited(true);
+                    setTradeOrBusiness(e.target.value);
+                  }}
                   placeholder={
                     role === 'employer'
                       ? 'e.g. Hardware Shop, Construction Contractor'

@@ -18,8 +18,12 @@ export interface UserAccount {
   created_at?: string;
 }
 
-const rawUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined;
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined;
+const rawUrl =
+  (import.meta.env.VITE_SUPABASE_URL as string | undefined) ||
+  (typeof __SUPABASE_URL__ !== 'undefined' && __SUPABASE_URL__ ? __SUPABASE_URL__ : undefined);
+const supabaseAnonKey =
+  (import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined) ||
+  (typeof __SUPABASE_ANON_KEY__ !== 'undefined' && __SUPABASE_ANON_KEY__ ? __SUPABASE_ANON_KEY__ : undefined);
 const supabaseUrl = rawUrl ? rawUrl.replace(/\/rest\/v1\/?$/i, '').replace(/\/$/, '') : undefined;
 
 export const supabase: SupabaseClient | null =

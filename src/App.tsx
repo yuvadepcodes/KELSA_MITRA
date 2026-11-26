@@ -44,6 +44,11 @@ import {
   parseVoiceMarketplaceCommand,
   stopBrowserSpeech,
 } from './services/voiceService';
+import {
+  getBrandParts,
+  localizeDisplayName,
+  localizeRoleLabel,
+} from './utils/transliterate';
 
 type WorkerSection = 'discover' | 'shifts';
 
@@ -170,6 +175,18 @@ export default function App() {
       stopBrowserSpeech();
     };
   }, []);
+
+  const brand = getBrandParts(lang);
+
+  useEffect(() => {
+    document.title = `${brand.full} — ${
+      lang === 'kn'
+        ? 'ಧ್ವನಿ ಆಧಾರಿತ ಸ್ಥಳೀಯ ಕೆಲಸ'
+        : lang === 'hi'
+        ? 'वॉयस-फर्स्ट स्थानीय काम'
+        : 'Voice-First Local Job Matching'
+    }`;
+  }, [brand.full, lang]);
 
   const showToast = (title: string, detail: string) => {
     setToast({ title, detail });
@@ -430,13 +447,13 @@ export default function App() {
       {/* ================= CLEAN 3-ZONE TOP APP BAR ================= */}
       <header className="sticky top-0 z-30 bg-white/95 backdrop-blur-md border-b border-stone-200/90">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 h-14 flex items-center justify-between gap-4">
-          {/* Zone 1: KELSAಮಿತ್ರ Brand Wordmark */}
+          {/* Zone 1: Localized Brand Wordmark */}
           <a
             href="#top"
             className="text-xl font-extrabold tracking-tight text-[#14171A] whitespace-nowrap shrink-0 inline-flex items-baseline"
           >
-            <span>KELSA</span>
-            <span className="text-[#EA580C] font-['Noto_Sans_Kannada',sans-serif] ml-0.5">ಮಿತ್ರ</span>
+            <span>{brand.prefix}</span>
+            <span className={`text-[#EA580C] ml-0.5 ${brand.suffixFontClass}`}>{brand.suffix}</span>
           </a>
 
           {/* Zone 2: Primary App Navigation (Desktop) */}
@@ -471,6 +488,8 @@ export default function App() {
             >
               {lang === 'kn'
                 ? `ನನ್ನ ಶಿಫ್ಟ್‌ಗಳು (${myShifts.length})`
+                : lang === 'hi'
+                ? `मेरी शिफ्ट (${myShifts.length})`
                 : `My Shifts (${myShifts.length})`}
             </button>
             <button
@@ -505,7 +524,13 @@ export default function App() {
             >
               <User className={`w-3.5 h-3.5 shrink-0 ${currentUser?.role === 'employer' ? 'text-[#2563EB]' : 'text-[#EA580C]'}`} />
               <span className="truncate">
-                {currentUser ? `${currentUser.name} · ${currentUser.role}` : 'Sign In'}
+                {currentUser
+                  ? `${localizeDisplayName(currentUser.name, lang)} · ${localizeRoleLabel(currentUser.role, lang)}`
+                  : lang === 'kn'
+                  ? 'ಸೈನ್ ಇನ್'
+                  : lang === 'hi'
+                  ? 'साइन इन'
+                  : 'Sign In'}
               </span>
             </button>
 
@@ -1236,7 +1261,11 @@ export default function App() {
                         <div className="space-y-1.5">
                           <div className="flex flex-wrap items-center gap-2 text-xs">
                             <span className="text-base font-extrabold text-[#14171A]">
-                              {lang === 'kn' ? w.nameKannada : w.name}
+                              {lang === 'kn'
+                                ? w.nameKannada
+                                : lang === 'hi'
+                                ? localizeDisplayName(w.nameKannada || w.name, 'hi')
+                                : w.name}
                             </span>
                             <span className="inline-flex items-center gap-0.5 font-bold text-[#14171A]">
                               <Star className="w-3.5 h-3.5 fill-amber-400 text-amber-400" />
@@ -1246,7 +1275,7 @@ export default function App() {
                           </div>
 
                           <p className="text-xs font-bold text-[#EA580C]">
-                            {lang === 'kn' ? w.skillKannada : w.skillEnglish} · {w.location} ({w.distanceKm} km)
+                            {lang === 'kn' ? w.skillKannada : lang === 'hi' ? w.skillHindi : w.skillEnglish} · {w.location} ({w.distanceKm} km)
                           </p>
                           <p className="text-xs text-stone-600 italic">“{introText}”</p>
                         </div>
@@ -1299,7 +1328,7 @@ export default function App() {
       <footer className="border-t border-stone-200 bg-white py-5 px-4 sm:px-6 mb-16 md:mb-0">
         <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-stone-500">
           <p>
-            <strong className="text-[#14171A]">KELSAಮಿತ್ರ</strong> · Hyper-Local Direct Work Network (5–10 km) · Zero-commission direct work
+            <strong className="text-[#14171A]">{brand.full}</strong> · Hyper-Local Direct Work Network (5–10 km) · Zero-commission direct work
           </p>
           <button
             type="button"

@@ -27,6 +27,7 @@ import {
   stopBrowserSpeech,
 } from '../services/voiceService';
 import { UserAccount, findUserByPhone } from '../services/supabaseService';
+import { getBrandParts, localizeDisplayName } from '../utils/transliterate';
 
 interface OnboardingModalProps {
   isOpen: boolean;
@@ -854,13 +855,19 @@ export default function OnboardingModal({
                 {currentUser
                   ? lang === 'kn'
                     ? 'ನಿಮ್ಮ ಖಾತೆ ವಿವರ'
-                    : 'Your KELSAಮಿತ್ರ Account'
+                    : lang === 'hi'
+                    ? `आपका ${getBrandParts(lang).full} खाता`
+                    : `Your ${getBrandParts(lang).full} Account`
                   : mode === 'login'
                   ? lang === 'kn'
                     ? 'ಹಳೆಯ ಖಾತೆಗೆ ಲಾಗಿನ್'
+                    : lang === 'hi'
+                    ? 'मौजूदा खाते में लॉगिन करें'
                     : 'Log In to Existing Account'
                   : lang === 'kn'
                   ? 'ಮಾತನಾಡಿ ಖಾತೆ ತೆರೆಯಿರಿ'
+                  : lang === 'hi'
+                  ? 'बोलकर साइन इन करें (Voice Q&A)'
                   : 'Sign In (Voice Q&A)'}
               </h2>
               <p className="text-xs text-stone-500 mt-0.5">
@@ -1231,7 +1238,7 @@ export default function OnboardingModal({
               {(name || phone) && (
                 <div className="bg-stone-100/80 rounded-xl px-3.5 py-2.5 text-[11px] text-stone-700 flex flex-wrap gap-x-3 gap-y-1">
                   <span>Role: <strong className="text-[#14171A]">{role}</strong></span>
-                  {name && <span>Name: <strong className="text-[#14171A]">{name}</strong></span>}
+                  {name && <span>Name: <strong className="text-[#14171A]">{localizeDisplayName(name, lang)}</strong></span>}
                   {phone && <span>Phone: <strong className="text-[#059669] tabular-nums">{phone}</strong></span>}
                 </div>
               )}

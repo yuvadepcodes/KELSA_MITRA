@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { X, PhoneCall, MessageSquare, ShieldCheck, MapPin, Clock, CheckCircle2, Banknote } from 'lucide-react';
 import { Job } from '../services/jobService';
 import { SupportedLang } from '../services/voiceService';
+import { getBrandParts } from '../utils/transliterate';
 
 interface JobConnectModalProps {
   job: Job | null;
@@ -131,7 +132,7 @@ export default function JobConnectModal({
 
               <a
                 href={`https://wa.me/${job.phone.replace(/[^0-9]/g, '')}?text=${encodeURIComponent(
-                  `Namaskara ${job.ownerName}, I saw your ${job.titleEnglish} job on KELSAಮಿತ್ರ and I am available.`
+                  `Namaskara ${job.ownerName}, I saw your ${job.titleEnglish} job on ${getBrandParts(lang).full} and I am available.`
                 )}`}
                 target="_blank"
                 rel="noreferrer"

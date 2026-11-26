@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import express, { type Request, type Response } from 'express';
+import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -7,7 +8,10 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const PORT = Number(process.env.PORT) || 3000;
-const IS_PROD = process.env.NODE_ENV === 'production';
+const DIST_INDEX = path.join(__dirname, 'dist', 'index.html');
+const IS_PROD =
+  process.env.NODE_ENV === 'production' ||
+  (process.env.npm_lifecycle_event !== 'dev' && fs.existsSync(DIST_INDEX));
 
 type SupportedLang = 'kn' | 'hi' | 'en';
 

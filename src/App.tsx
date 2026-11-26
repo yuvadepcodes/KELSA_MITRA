@@ -19,6 +19,10 @@ import {
   INITIAL_TUMAKURU_WORKERS,
   INITIAL_PAYOUT_HISTORY,
   isLiveDatabaseConfigured,
+  fetchNearbyJobs,
+  fetchWorkersFromSupabase,
+  createJobInSupabase,
+  submitShiftApplication,
 } from './services/jobService';
 import {
   SupportedLang,
@@ -48,7 +52,7 @@ export default function App() {
 
   // Marketplace Data
   const [jobs, setJobs] = useState<Job[]>(INITIAL_TUMAKURU_JOBS);
-  const [workers] = useState<Worker[]>(INITIAL_TUMAKURU_WORKERS);
+  const [workers, setWorkers] = useState<Worker[]>(INITIAL_TUMAKURU_WORKERS);
   const [selectedJobId, setSelectedJobId] = useState<string>(INITIAL_TUMAKURU_JOBS[0].id);
   const [modalJob, setModalJob] = useState<Job | null>(null);
   const [myShifts, setMyShifts] = useState<ShiftApplication[]>([]);
@@ -79,8 +83,21 @@ export default function App() {
   const [isArchOpen, setIsArchOpen] = useState(false);
 
   useEffect(() => {
+    if (isLiveDatabaseConfigured()) {
+      fetchNearbyJobs(radiusKm).then((loaded) => {
+        if (loaded.length > 0) {
+          setJobs(loaded);
+          setSelectedJobId(loaded[0].id);
+        }
+      });
+      fetchWorkersFromSupabase().then((loadedWorkers) => {
+        if (loadedWorkers.length > 0) {
+          setWorkers(loadedWorkers);
+        }
+      });
+    }
     return () => stopBrowserSpeech();
-  }, []);
+  }, [radiusKm]);
 
   const showToast = (title: string, detail: string) => {
     setToast({ title, detail });
@@ -103,6 +120,7 @@ export default function App() {
   const handleConfirmShift = (job: Job) => {
     const exists = myShifts.some((s) => s.job.id === job.id);
     if (!exists) {
+      submitShiftApplication(job.id, '+91 94480 00000').catch(() => {});
       setMyShifts((prev) => [
         {
           id: `app-${Date.now()}`,
@@ -167,12 +185,11 @@ export default function App() {
     }, 1500);
   };
 
-  const handleBroadcastJob = (e: React.FormEvent) => {
+  const handleBroadcastJob = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!employerDraft.trim()) return;
 
-    const newJob: Job = {
-      id: `j-${Date.now()}`,
+    const savedJob = await createJobInSupabase({
       titleKannada: employerDraft,
       titleHindi: employerDraft,
       titleEnglish: `${employerDraft} (${employerHeadcount} needed)`,
@@ -190,7 +207,6 @@ export default function App() {
       ownerName: 'Business Owner',
       verifiedEmployer: true,
       phone: employerPhone,
-      timeAgo: 'Just now',
       urgency: 'Immediate',
       paymentMode: 'Evening UPI',
       description: `Immediate requirement for ${employerHeadcount} workers in ${employerArea}.`,
@@ -204,10 +220,10 @@ export default function App() {
         : employerArea.includes('Chickpet')
         ? [13.338, 77.1105]
         : [13.3415, 77.1062],
-    };
+    });
 
-    setJobs((prev) => [newJob, ...prev]);
-    setSelectedJobId(newJob.id);
+    setJobs((prev) => [savedJob, ...prev]);
+    setSelectedJobId(savedJob.id);
     setEmployerDraft('');
     setEmployerParsedPreview(false);
     confetti({ particleCount: 65, spread: 80, origin: { y: 0.7 } });

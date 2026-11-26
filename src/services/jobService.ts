@@ -1,5 +1,6 @@
 // Isolated Hyper-Local Job & Worker Matching Service (PostGIS / Supabase ready)
 // Plug in VITE_SUPABASE_URL & VITE_SUPABASE_ANON_KEY in .env for live persistence.
+import { supabase, isSupabaseConfigured } from './supabaseClient';
 
 export interface Job {
   id: string;
@@ -66,9 +67,17 @@ export interface PayoutRecord {
   settled: boolean;
 }
 
-const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string | undefined;
+export const isLiveDatabaseConfigured = (): boolean => isSupabaseConfigured();
 
-export const isLiveDatabaseConfigured = (): boolean => Boolean(SUPABASE_URL);
+function formatRelativeTime(isoDate?: string): string {
+  if (!isoDate) return 'Live';
+  const diffMins = Math.max(0, Math.floor((Date.now() - new Date(isoDate).getTime()) / 60000));
+  if (diffMins < 2) return 'Just now';
+  if (diffMins < 60) return `${diffMins}m ago`;
+  const diffHours = Math.floor(diffMins / 60);
+  if (diffHours < 24) return `${diffHours}h ago`;
+  return `${Math.floor(diffHours / 24)}d ago`;
+}
 
 export const TUMAKURU_LOCALITIES = [
   { id: 'all', label: 'All Tumakuru', kn: 'ಎಲ್ಲಾ ತುಮಕೂರು' },
@@ -350,3 +359,136 @@ export const INITIAL_PAYOUT_HISTORY: PayoutRecord[] = [
     settled: true,
   },
 ];
+
+// ================= REAL SUPABASE BACKEND ADAPTERS =================
+
+export async function fetchNearbyJobs(radiusKm: number = 10): Promise<Job[]> {
+  if (!supabase) return INITIAL_TUMAKURU_JOBS;
+
+  const { data, error } = await supabase.rpc('nearby_jobs', {
+    user_lat: 13.3392,
+    user_lng: 77.1140,
+    radius_km: radiusKm,
+  });
+
+  if (error || !data || data.length === 0) {
+    return INITIAL_TUMAKURU_JOBS;
+  }
+
+  return data.map((row: Record<string, unknown>) => ({
+    id: String(row.id),
+    titleKannada: String(row.title_kannada ?? row.title_english),
+    titleHindi: String(row.title_hindi ?? row.title_english),
+    titleEnglish: String(row.title_english),
+    category: String(row.category),
+    wage: Number(row.wage),
+    wageUnit: String(row.wage_unit ?? '/day'),
+    shiftTime: String(row.shift_time ?? '9:00 AM – 6:00 PM'),
+    slotsLeft: Number(row.slots_left ?? 1),
+    location: String(row.location),
+    areaTag: String(row.area_tag),
+    distanceKm: Number(row.distance_km ?? 1.5),
+    commuteNote: String(row.commute_note ?? '10 min walk'),
+    pincode: String(row.pincode ?? '572101'),
+    employer: String(row.employer),
+    ownerName: String(row.owner_name ?? 'Owner'),
+    verifiedEmployer: Boolean(row.verified_employer ?? true),
+    phone: String(row.phone),
+    timeAgo: formatRelativeTime(row.created_at ? String(row.created_at) : undefined),
+    urgency: (row.urgency as Job['urgency']) ?? 'Immediate',
+    paymentMode: (row.payment_mode as Job['paymentMode']) ?? 'Evening UPI',
+    description: String(row.description ?? ''),
+    descriptionKannada: String(row.description_kannada ?? ''),
+    latLng: [Number(row.lat), Number(row.lng)] as [number, number],
+  }));
+}
+
+export async function createJobInSupabase(job: Omit<Job, 'id' | 'timeAgo'>): Promise<Job> {
+  const localJob: Job = {
+    ...job,
+    id: `j-${Date.now()}`,
+    timeAgo: 'Just now',
+  };
+
+  if (!supabase) return localJob;
+
+  const { data, error } = await supabase
+    .from('jobs')
+    .insert({
+      title_kannada: job.titleKannada,
+      title_hindi: job.titleHindi,
+      title_english: job.titleEnglish,
+      category: job.category,
+      wage: job.wage,
+      wage_unit: job.wageUnit,
+      shift_time: job.shiftTime,
+      slots_left: job.slotsLeft,
+      location: job.location,
+      area_tag: job.areaTag,
+      commute_note: job.commuteNote,
+      pincode: job.pincode,
+      employer: job.employer,
+      owner_name: job.ownerName,
+      verified_employer: job.verifiedEmployer,
+      phone: job.phone,
+      urgency: job.urgency,
+      payment_mode: job.paymentMode,
+      description: job.description,
+      description_kannada: job.descriptionKannada,
+      lat: job.latLng[0],
+      lng: job.latLng[1],
+    })
+    .select()
+    .single();
+
+  if (error || !data) return localJob;
+
+  return {
+    ...localJob,
+    id: String(data.id),
+  };
+}
+
+export async function submitShiftApplication(jobId: string, workerPhone: string): Promise<void> {
+  if (!supabase) return;
+  await supabase.from('shift_applications').insert({
+    job_id: jobId,
+    worker_phone: workerPhone,
+    status: 'Shift Confirmed',
+  });
+}
+
+export async function fetchWorkersFromSupabase(): Promise<Worker[]> {
+  if (!supabase) return INITIAL_TUMAKURU_WORKERS;
+
+  const { data, error } = await supabase
+    .from('workers')
+    .select('*')
+    .order('gigs_completed', { ascending: false });
+
+  if (error || !data || data.length === 0) {
+    return INITIAL_TUMAKURU_WORKERS;
+  }
+
+  return data.map((row: Record<string, unknown>) => ({
+    id: String(row.id),
+    name: String(row.name),
+    nameKannada: String(row.name_kannada ?? row.name),
+    skillKannada: String(row.skill_kannada),
+    skillHindi: String(row.skill_hindi ?? row.skill_english),
+    skillEnglish: String(row.skill_english),
+    experience: String(row.experience),
+    rating: Number(row.rating ?? 4.8),
+    location: String(row.location),
+    distanceKm: 2.0,
+    wageExpected: Number(row.wage_expected),
+    phone: String(row.phone),
+    verified: Boolean(row.verified ?? true),
+    availableToday: Boolean(row.available_today ?? true),
+    gigsCompleted: Number(row.gigs_completed ?? 0),
+    audioNote: String(row.audio_note ?? ''),
+    audioNoteKannada: String(row.audio_note_kannada ?? ''),
+    latLng: [Number(row.lat), Number(row.lng)] as [number, number],
+  }));
+}
+

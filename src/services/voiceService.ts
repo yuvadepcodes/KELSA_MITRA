@@ -516,12 +516,33 @@ export function parseVoiceMarketplaceCommand(
   else if (t.includes('b.h') || t.includes('bh road') || t.includes('ಬಿ.ಹೆಚ್')) area = 'B.H. Road';
 
   let skill: string | undefined;
-  if (t.includes('mason') || t.includes('ಗೌಂಡಿ') || t.includes('राजमिस्त्री') || t.includes('brick')) skill = 'Mason';
-  else if (t.includes('load') || t.includes('unload') || t.includes('ಹಮಾಲಿ') || t.includes('ಇಳಿಸ') || t.includes('लदान')) skill = 'Loader';
-  else if (t.includes('electric') || t.includes('ಎಲೆಕ್ಟ್ರಿ') || t.includes('बिजली')) skill = 'Electrician';
-  else if (t.includes('mechanic') || t.includes('garage') || t.includes('ಮೆಕ್ಯಾನಿಕ್') || t.includes('ಗ್ಯಾರೇಜ್')) skill = 'Mechanic';
-  else if (t.includes('shop') || t.includes('pack') || t.includes('ಅಂಗಡಿ') || t.includes('दुकान')) skill = 'Shop';
-  else if (t.includes('helper') || t.includes('ಹೆಲ್ಪರ್') || t.includes('हेल्पर')) skill = 'Helper';
+  if (t.includes('electric') || t.includes('wiring') || t.includes('wireman') || t.includes('ಎಲೆಕ್ಟ್ರಿ') || t.includes('ವೈರಿಂಗ್') || t.includes('इलेक्ट्रीशियन') || t.includes('बिजली')) {
+    skill = 'Electrician';
+  } else if (t.includes('plumb') || t.includes('pipe') || t.includes('tap') || t.includes('ಪ್ಲಂಬರ್') || t.includes('ಪೈಪ್') || t.includes('ನಲ್ಲಿ') || t.includes('प्लंबर') || t.includes('नल')) {
+    skill = 'Plumber';
+  } else if (t.includes('driver') || t.includes('delivery') || t.includes('rider') || t.includes('courier') || t.includes('ಡೆಲಿವರಿ') || t.includes('ಡ್ರೈವರ್') || t.includes('ಚಾಲಕ') || t.includes('ಬೈಕ್') || t.includes('ड्राइवर') || t.includes('डिलीवरी')) {
+    skill = 'Driver';
+  } else if (t.includes('paint') || t.includes('putty') || t.includes('ಪೇಂಟ್') || t.includes('ಬಣ್ಣ') || t.includes('पेंटर') || t.includes('पुट्टी')) {
+    skill = 'Painter';
+  } else if (t.includes('carpent') || t.includes('wood') || t.includes('furniture') || t.includes('ಬಡಗಿ') || t.includes('ಕಾರ್ಪೆಂಟರ್') || t.includes('ಮರ') || t.includes('बढ़ई') || t.includes('फर्नीचर')) {
+    skill = 'Carpenter';
+  } else if (t.includes('security') || t.includes('guard') || t.includes('watchman') || t.includes('ಸೆಕ್ಯುರಿಟಿ') || t.includes('ಗಾರ್ಡ್') || t.includes('ಕಾವಲು') || t.includes('सिक्योरिटी') || t.includes('गार्ड')) {
+    skill = 'Security';
+  } else if (t.includes('cook') || t.includes('catering') || t.includes('kitchen') || t.includes('hotel') || t.includes('ಅಡುಗೆ') || t.includes('ಕ್ಯಾಟರಿಂಗ್') || t.includes('ಹೋಟೆಲ್') || t.includes('रसोइया') || t.includes('कुक') || t.includes('कैटरिंग')) {
+    skill = 'Cook';
+  } else if (t.includes('weld') || t.includes('grill') || t.includes('fabri') || t.includes('ವೆಲ್ಡರ್') || t.includes('ಗ್ರಿಲ್') || t.includes('वेल्डर')) {
+    skill = 'Welder';
+  } else if (t.includes('mason') || t.includes('goundi') || t.includes('ಗೌಂಡಿ') || t.includes('ಮೇಸನ್') || t.includes('राजमिस्त्री') || t.includes('brick')) {
+    skill = 'Mason';
+  } else if (t.includes('load') || t.includes('unload') || t.includes('hamali') || t.includes('packing') || t.includes('warehouse') || t.includes('godown') || t.includes('ಹಮಾಲಿ') || t.includes('ಲೋಡ್') || t.includes('ಪ್ಯಾಕಿಂಗ್') || t.includes('ಗೋದಾಮು') || t.includes('लोडर') || t.includes('हमाली') || t.includes('पैकिंग')) {
+    skill = 'Loader';
+  } else if (t.includes('mechanic') || t.includes('garage') || t.includes('puncture') || t.includes('ಮೆಕ್ಯಾನಿಕ್') || t.includes('ಗ್ಯಾರೇಜ್') || t.includes('मैकेनिक')) {
+    skill = 'Mechanic';
+  } else if (t.includes('shop') || t.includes('hardware') || t.includes('ಅಂಗಡಿ') || t.includes('दुकान')) {
+    skill = 'Shop';
+  } else if (t.includes('helper') || t.includes('ಹೆಲ್ಪರ್') || t.includes('ಸಹಾಯಕ') || t.includes('हेल्पर')) {
+    skill = 'Helper';
+  }
 
   const normalizedNums = transcript
     .replace(/[೦-೯]/g, (d) => String(d.charCodeAt(0) - 0x0ce6))
@@ -544,7 +565,7 @@ export function parseVoiceMarketplaceCommand(
 
   if (isPostingJob && (skill || minWage || t.length > 8)) {
     const jobTitle = skill ? `${skill} Helper` : transcript.slice(0, 48);
-    const jobArea = area ? `${area}, Tumakuru` : 'B.H. Road, Tumakuru';
+    const jobArea = area || 'B.H. Road Main Market';
     const wage = minWage || 700;
     const reply =
       lang === 'kn'
@@ -563,12 +584,16 @@ export function parseVoiceMarketplaceCommand(
     };
   }
 
+  const areaPhraseKn = area ? `${area} ಹತ್ತಿರ` : 'ನಿಮ್ಮ ಹತ್ತಿರ';
+  const areaPhraseHi = area ? `${area} के पास` : 'आपके पास';
+  const areaPhraseEn = area ? `near ${area}` : 'nearby';
+
   const reply =
     lang === 'kn'
-      ? `${area || 'ತುಮಕೂರು'} ಹತ್ತಿರ${skill ? ` ${skill}` : ''} ಕೆಲಸಗಳನ್ನು ತೋರಿಸಲಾಗುತ್ತಿದೆ.`
+      ? `${areaPhraseKn}${skill ? ` ${skill}` : ''} ಕೆಲಸಗಳನ್ನು ತೋರಿಸಲಾಗುತ್ತಿದೆ.`
       : lang === 'hi'
-      ? `${area || 'तुमकुरु'} के पास${skill ? ` ${skill}` : ''} काम दिखाए जा रहे हैं।`
-      : `Showing matching${skill ? ` ${skill}` : ''} jobs near ${area || 'Tumakuru'}.`;
+      ? `${areaPhraseHi}${skill ? ` ${skill}` : ''} काम दिखाए जा रहे हैं।`
+      : `Showing matching${skill ? ` ${skill}` : ''} jobs ${areaPhraseEn}.`;
 
   return {
     intent: 'filterJobs',

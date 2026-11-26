@@ -141,7 +141,7 @@ export default function ElevenLabsVoiceSheet({
             </div>
             <p className="text-[11px] font-semibold text-white/90 mt-2 text-center">
               {isListening
-                ? 'Try saying: “ಗೌಂಡಿ ಕೆಲಸ ಬೇಕು” or “Need 2 helpers for ₹700”'
+                ? 'Try saying: “Electrician near Chickpet”, “Plumber above 800”, or “ಡ್ರೈವರ್ ಕೆಲಸ ಬೇಕು”'
                 : 'Tap Speak Now below to search or post by voice'}
             </p>
           </div>

@@ -326,6 +326,8 @@ export async function fetchAllJobs(): Promise<Job[]> {
     localCustomJobs = [];
   }
 
+  let liveJobs: Job[] = [];
+
   if (supabase) {
     try {
       const { data, error } = await supabase
@@ -334,15 +336,28 @@ export async function fetchAllJobs(): Promise<Job[]> {
         .order('created_at', { ascending: false });
 
       if (!error && data && data.length > 0) {
-        return data.map((row) => normalizeJobRow(row as Record<string, unknown>));
+        liveJobs = data.map((row) => normalizeJobRow(row as Record<string, unknown>));
       }
     } catch {
       // Fall back to seed + localStorage
     }
   }
 
-  const seenIds = new Set(localCustomJobs.map((j) => j.id));
-  return [...localCustomJobs, ...INITIAL_TUMAKURU_JOBS.filter((j) => !seenIds.has(j.id))];
+  const seenIds = new Set(liveJobs.map((j) => j.id));
+  const seenTitles = new Set(liveJobs.map((j) => j.titleEnglish.trim().toLowerCase()));
+  const mergedLocal = localCustomJobs.filter(
+    (j) => !seenIds.has(j.id) && !seenTitles.has(j.titleEnglish.trim().toLowerCase())
+  );
+  mergedLocal.forEach((j) => {
+    seenIds.add(j.id);
+    seenTitles.add(j.titleEnglish.trim().toLowerCase());
+  });
+
+  const mergedSeeds = INITIAL_TUMAKURU_JOBS.filter(
+    (j) => !seenIds.has(j.id) && !seenTitles.has(j.titleEnglish.trim().toLowerCase())
+  );
+
+  return [...liveJobs, ...mergedLocal, ...mergedSeeds];
 }
 
 export async function createJobRecord(params: {

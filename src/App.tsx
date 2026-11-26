@@ -58,12 +58,29 @@ interface VoiceFilter {
   minWage?: number;
 }
 
+const SKILL_SYNONYMS: Record<string, string[]> = {
+  electrician: ['electrician', 'electrical', 'wiring', 'wireman', 'ಎಲೆಕ್ಟ್ರಿಷಿಯನ್', 'ಎಲೆಕ್ಟ್ರಿಕಲ್', 'इलेक्ट्रीशियन'],
+  plumber: ['plumber', 'plumbing', 'pipe', 'tap', 'sanitary', 'ಪ್ಲಂಬರ್', 'ಪೈಪ್', 'प्लंबर'],
+  driver: ['driver', 'delivery', 'rider', 'courier', 'tempo', 'ಡೆಲಿವರಿ', 'ಡ್ರೈವರ್', 'ड्राइवर', 'डिलीवरी'],
+  painter: ['painter', 'painting', 'putty', 'primer', 'ಪೇಂಟರ್', 'ಪೇಂಟಿಂಗ್', 'पेंटर'],
+  carpenter: ['carpenter', 'wood', 'furniture', 'plywood', 'ಬಡಗಿ', 'ಕಾರ್ಪೆಂಟರ್', 'बढ़ई'],
+  security: ['security', 'guard', 'watchman', 'night shift', 'ಸೆಕ್ಯುರಿಟಿ', 'ಗಾರ್ಡ್', 'सिक्योरिटी', 'गार्ड'],
+  cook: ['cook', 'kitchen', 'catering', 'hotel', 'tiffin', 'ಅಡುಗೆ', 'ಕ್ಯಾಟರಿಂಗ್', 'रसोइया', 'कैटरिंग'],
+  welder: ['welder', 'welding', 'grill', 'fabricator', 'ವೆಲ್ಡರ್', 'वेल्डर'],
+  mason: ['mason', 'goundi', 'construction', 'brick', 'ಗೌಂಡಿ', 'ಮೇಸನ್', 'राजमिस्त्री'],
+  loader: ['loader', 'loading', 'hamali', 'packing', 'warehouse', 'godown', 'dispatch', 'ಹಮಾಲಿ', 'ಪ್ಯಾಕಿಂಗ್', 'लोडर', 'हमाली', 'पैकिंग'],
+  mechanic: ['mechanic', 'garage', 'puncture', 'servicing', 'ಮೆಕ್ಯಾನಿಕ್', 'ಗ್ಯಾರೇಜ್', 'मैकेनिक'],
+  shop: ['shop', 'hardware', 'retail', 'ಅಂಗಡಿ', 'दुकान'],
+  helper: ['helper', 'ಸಹಾಯಕ', 'ಹೆಲ್ಪರ್', 'हेल्पर'],
+};
+
 function matchesVoiceFilter(job: Job, filter: VoiceFilter | null): boolean {
   if (!filter) return true;
   if (filter.skill && filter.skill.trim()) {
     const s = filter.skill.trim().toLowerCase();
-    const skillHaystack = `${job.titleEnglish} ${job.titleKannada} ${job.titleHindi} ${job.category} ${job.description}`.toLowerCase();
-    if (!skillHaystack.includes(s)) return false;
+    const skillHaystack = `${job.titleEnglish} ${job.titleKannada} ${job.titleHindi} ${job.category} ${job.description} ${job.descriptionKannada} ${job.employer}`.toLowerCase();
+    const keywords = SKILL_SYNONYMS[s] || [s];
+    if (!keywords.some((kw) => skillHaystack.includes(kw))) return false;
   }
   if (filter.area && filter.area.trim()) {
     const a = filter.area.trim().toLowerCase();
@@ -417,7 +434,18 @@ export default function App() {
     );
   };
 
-  const categories = ['All', 'Auto Garage', 'Construction', 'Logistics', 'Industrial', 'Retail Shop', 'Events'];
+  const categories = [
+    'All',
+    'Electrical & Plumbing',
+    'Delivery & Driving',
+    'Construction',
+    'Logistics',
+    'Auto Garage',
+    'Industrial',
+    'Retail Shop',
+    'Events',
+    'Security & Care',
+  ];
 
   const filteredJobs = jobs
     .filter((job) => {
@@ -429,8 +457,12 @@ export default function App() {
         !q ||
         job.titleEnglish.toLowerCase().includes(q) ||
         job.titleKannada.toLowerCase().includes(q) ||
+        job.titleHindi.toLowerCase().includes(q) ||
+        job.category.toLowerCase().includes(q) ||
+        job.areaTag.toLowerCase().includes(q) ||
         job.location.toLowerCase().includes(q) ||
-        job.employer.toLowerCase().includes(q);
+        job.employer.toLowerCase().includes(q) ||
+        job.description.toLowerCase().includes(q);
       const matchesVoice = matchesVoiceFilter(job, voiceFilter);
       return withinRadius && matchesCat && matchesLoc && matchesQuery && matchesVoice;
     })

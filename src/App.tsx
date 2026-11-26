@@ -1,14 +1,17 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   PhoneCall, Mic, Volume2, VolumeX, Building2, MapPin,
   CheckCircle2, Cpu, Layers, X, Navigation, Briefcase,
   ShieldCheck, Footprints, Bus, Play, Square, ArrowRight,
-  Clock, Wallet, SlidersHorizontal, Star, Search, Check
+  Clock, Wallet, SlidersHorizontal, Star, Search, Check, User
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import TumakuruRadar from './components/TumakuruRadar';
 import JobConnectModal from './components/JobConnectModal';
+import OnboardingModal from './components/OnboardingModal';
+import ElevenLabsVoiceSheet, { TranscriptEntry } from './components/ElevenLabsVoiceSheet';
+import AccountProfileView from './components/AccountProfileView';
 import {
   Job,
   Worker,
@@ -18,29 +21,65 @@ import {
   INITIAL_TUMAKURU_JOBS,
   INITIAL_TUMAKURU_WORKERS,
   INITIAL_PAYOUT_HISTORY,
-  isLiveDatabaseConfigured,
-  fetchNearbyJobs,
   fetchWorkersFromSupabase,
-  createJobInSupabase,
   submitShiftApplication,
 } from './services/jobService';
 import {
+  UserAccount,
+  isSupabaseReady,
+  getStoredCurrentUser,
+  setStoredCurrentUser,
+  upsertUserAccount,
+  fetchAllJobs,
+  createJobRecord,
+  subscribeToJobsRealtime,
+} from './services/supabaseService';
+import {
   SupportedLang,
-  VoiceExtractionResult,
-  isLiveVoiceConfigured,
-  transcribeAndExtractWorkerIntent,
-  transcribeEmployerJobPost,
-  speakTextWithBrowserFallback,
+  MicRecordingSession,
+  fetchSarvamStatus,
+  speakWithSarvamOrFallback,
+  startSarvamMicCapture,
+  transcribeAudioWithSarvam,
+  parseVoiceMarketplaceCommand,
   stopBrowserSpeech,
 } from './services/voiceService';
 
 type WorkerSection = 'discover' | 'shifts';
 
+interface VoiceFilter {
+  skill?: string;
+  area?: string;
+  minWage?: number;
+}
+
+function matchesVoiceFilter(job: Job, filter: VoiceFilter | null): boolean {
+  if (!filter) return true;
+  if (filter.skill && filter.skill.trim()) {
+    const s = filter.skill.trim().toLowerCase();
+    const skillHaystack = `${job.titleEnglish} ${job.titleKannada} ${job.titleHindi} ${job.category} ${job.description}`.toLowerCase();
+    if (!skillHaystack.includes(s)) return false;
+  }
+  if (filter.area && filter.area.trim()) {
+    const a = filter.area.trim().toLowerCase();
+    const areaHaystack = `${job.location} ${job.areaTag}`.toLowerCase();
+    if (!areaHaystack.includes(a)) return false;
+  }
+  if (typeof filter.minWage === 'number' && !Number.isNaN(filter.minWage) && filter.minWage > 0) {
+    if (job.wage < filter.minWage) return false;
+  }
+  return true;
+}
+
 export default function App() {
+  const [currentUser, setCurrentUser] = useState<UserAccount | null>(() => getStoredCurrentUser());
+  const [isOnboardingOpen, setIsOnboardingOpen] = useState<boolean>(() => !getStoredCurrentUser());
+
   const [lang, setLang] = useState<SupportedLang>('kn');
-  const [role, setRole] = useState<'worker' | 'employer'>('worker');
+  const [role, setRole] = useState<'worker' | 'employer'>(() => getStoredCurrentUser()?.role || 'worker');
   const [workerSection, setWorkerSection] = useState<WorkerSection>('discover');
   const [mobileDisplay, setMobileDisplay] = useState<'list' | 'map'>('list');
+  const [showAccountPanel, setShowAccountPanel] = useState(false);
 
   // Worker Daily Duty & Filters
   const [onDutyToday, setOnDutyToday] = useState(true);
@@ -49,6 +88,7 @@ export default function App() {
   const [sortBy, setSortBy] = useState<'nearest' | 'highest' | 'immediate'>('nearest');
   const [searchQuery, setSearchQuery] = useState('');
   const [radiusKm, setRadiusKm] = useState<5 | 10>(5);
+  const [voiceFilter, setVoiceFilter] = useState<VoiceFilter | null>(null);
 
   // Marketplace Data
   const [jobs, setJobs] = useState<Job[]>(INITIAL_TUMAKURU_JOBS);
@@ -62,11 +102,14 @@ export default function App() {
   // Audio playback
   const [playingId, setPlayingId] = useState<string | null>(null);
 
-  // Voice Assistant Bottom Sheet
-  const [isVoiceOpen, setIsVoiceOpen] = useState(false);
-  const [voicePhase, setVoicePhase] = useState<'listening' | 'processing' | 'matched'>('listening');
-  const [voiceResult, setVoiceResult] = useState<VoiceExtractionResult | null>(null);
-  const [isTtsPlaying, setIsTtsPlaying] = useState(false);
+  // Sarvam Voice Sheet & Status State
+  const [isVoiceSheetOpen, setIsVoiceSheetOpen] = useState(false);
+  const [sarvamConfigured, setSarvamConfigured] = useState(false);
+  const [voiceSheetStatus, setVoiceSheetStatus] = useState<'idle' | 'listening' | 'transcribing' | 'speaking'>('idle');
+  const [voiceMicBlocked, setVoiceMicBlocked] = useState(false);
+  const [voiceError, setVoiceError] = useState<string | null>(null);
+  const [transcripts, setTranscripts] = useState<TranscriptEntry[]>([]);
+  const voiceMicSessionRef = useRef<MicRecordingSession | null>(null);
 
   // Employer Form & View
   const [employerView, setEmployerView] = useState<'list' | 'map'>('list');
@@ -74,47 +117,74 @@ export default function App() {
   const [employerWage, setEmployerWage] = useState(700);
   const [employerHeadcount, setEmployerHeadcount] = useState(2);
   const [employerArea, setEmployerArea] = useState('B.H. Road, Tumakuru');
-  const [employerPhone, setEmployerPhone] = useState('+91 98450 55443');
-  const [isEmployerListening, setIsEmployerListening] = useState(false);
+  const [employerPhone, setEmployerPhone] = useState(() => getStoredCurrentUser()?.phone || '+91 98450 55443');
   const [employerParsedPreview, setEmployerParsedPreview] = useState(false);
 
   // Toast & Technical Spec Drawer
   const [toast, setToast] = useState<{ title: string; detail: string } | null>(null);
   const [isArchOpen, setIsArchOpen] = useState(false);
 
+  // Refs for fresh state inside ElevenLabs client tool callbacks
+  const jobsRef = useRef<Job[]>(jobs);
+  const currentUserRef = useRef<UserAccount | null>(currentUser);
+
   useEffect(() => {
-    if (isLiveDatabaseConfigured()) {
-      fetchNearbyJobs(radiusKm).then((loaded) => {
-        if (loaded.length > 0) {
-          setJobs(loaded);
-          setSelectedJobId(loaded[0].id);
-        }
-      });
-      fetchWorkersFromSupabase().then((loadedWorkers) => {
-        if (loadedWorkers.length > 0) {
-          setWorkers(loadedWorkers);
-        }
-      });
+    jobsRef.current = jobs;
+  }, [jobs]);
+
+  useEffect(() => {
+    currentUserRef.current = currentUser;
+    if (currentUser?.phone) {
+      setEmployerPhone(currentUser.phone);
     }
-    return () => stopBrowserSpeech();
-  }, [radiusKm]);
+  }, [currentUser]);
+
+  // Initial Supabase Load + Realtime Subscription
+  useEffect(() => {
+    let active = true;
+
+    fetchAllJobs().then((loaded) => {
+      if (active && loaded.length > 0) {
+        setJobs(loaded);
+        setSelectedJobId((curr) => (loaded.some((j) => j.id === curr) ? curr : loaded[0].id));
+      }
+    });
+
+    fetchWorkersFromSupabase().then((loadedWorkers) => {
+      if (active && loadedWorkers.length > 0) {
+        setWorkers(loadedWorkers);
+      }
+    });
+
+    const unsubscribe = subscribeToJobsRealtime((newJob) => {
+      setJobs((prev) => (prev.some((j) => j.id === newJob.id) ? prev : [newJob, ...prev]));
+    });
+
+    fetchSarvamStatus().then((status) => {
+      if (active) setSarvamConfigured(status.configured);
+    });
+
+    return () => {
+      active = false;
+      unsubscribe();
+      stopBrowserSpeech();
+    };
+  }, []);
 
   const showToast = (title: string, detail: string) => {
     setToast({ title, detail });
     setTimeout(() => setToast(null), 4000);
   };
 
-  const handlePlayAudio = (id: string, text: string) => {
+  const handlePlayAudio = async (id: string, text: string) => {
     if (playingId === id) {
       stopBrowserSpeech();
       setPlayingId(null);
       return;
     }
     setPlayingId(id);
-    speakTextWithBrowserFallback(text, lang);
-    setTimeout(() => {
-      setPlayingId((curr) => (curr === id ? null : curr));
-    }, 4500);
+    await speakWithSarvamOrFallback(text, lang);
+    setPlayingId((curr) => (curr === id ? null : curr));
   };
 
   const handleConfirmShift = (job: Job) => {
@@ -139,97 +209,173 @@ export default function App() {
     );
   };
 
-  const handleOpenVoiceAssistant = async () => {
-    setIsVoiceOpen(true);
-    setVoicePhase('listening');
-    setVoiceResult(null);
-    setIsTtsPlaying(false);
+  const handleVoiceCommandText = async (spokenText: string) => {
+    const clean = spokenText.trim();
+    if (!clean) return;
 
-    setTimeout(async () => {
-      setVoicePhase('processing');
-      const result = await transcribeAndExtractWorkerIntent(null, lang);
-      setTimeout(() => {
-        setVoiceResult(result);
-        setVoicePhase('matched');
-        setIsTtsPlaying(true);
-        speakTextWithBrowserFallback(result.ttsReply, lang);
-        setTimeout(() => setIsTtsPlaying(false), 4000);
-      }, 950);
-    }, 1600);
+    setTranscripts((prev) => [
+      ...prev,
+      { id: `u-${Date.now()}`, source: 'user', message: clean },
+    ]);
+
+    const parsed = parseVoiceMarketplaceCommand(clean, role, lang);
+
+    if (parsed.intent === 'createJob') {
+      const created = await createJobRecord({
+        title: parsed.skill || clean.slice(0, 48),
+        area: parsed.area || 'B.H. Road, Tumakuru',
+        wage: parsed.minWage || 700,
+        workersCount: parsed.headcount || 1,
+        employerName: currentUserRef.current?.name,
+        employerPhone: currentUserRef.current?.phone,
+      });
+      setJobs((prev) => (prev.some((j) => j.id === created.id) ? prev : [created, ...prev]));
+      setSelectedJobId(created.id);
+      confetti({ particleCount: 65, spread: 80, origin: { y: 0.7 } });
+      showToast('Instant Job Live', `${created.titleEnglish} · ₹${created.wage}/day`);
+    } else {
+      const nextFilter: VoiceFilter | null =
+        parsed.skill || parsed.area || parsed.minWage
+          ? { skill: parsed.skill, area: parsed.area, minWage: parsed.minWage }
+          : null;
+
+      setRole('worker');
+      setWorkerSection('discover');
+      setMobileDisplay('list');
+      setSelectedCategory('All');
+      setSelectedLocality('all');
+      setSearchQuery(nextFilter ? '' : clean);
+      setRadiusKm(10);
+      setVoiceFilter(nextFilter);
+
+      const filtered = jobsRef.current.filter((job) => matchesVoiceFilter(job, nextFilter));
+      if (filtered.length > 0) {
+        setSelectedJobId(filtered[0].id);
+      }
+      showToast(
+        lang === 'kn' ? 'ಧ್ವನಿ ಹುಡುಕಾಟ ಅನ್ವಯಿಸಲಾಗಿದೆ' : 'Sarvam Voice Applied',
+        `Found ${filtered.length} matching jobs in Tumakuru`
+      );
+    }
+
+    setTranscripts((prev) => [
+      ...prev,
+      { id: `ai-${Date.now()}`, source: 'ai', message: parsed.reply },
+    ]);
+    setVoiceSheetStatus('speaking');
+    await speakWithSarvamOrFallback(parsed.reply, lang);
+    setVoiceSheetStatus('idle');
   };
 
-  const handleApplyVoiceFilters = () => {
+  const startSarvamVoiceCapture = () => {
     stopBrowserSpeech();
-    setIsVoiceOpen(false);
-    setSelectedLocality('Kyathsandra');
-    setSelectedCategory('Construction');
-    setRole('worker');
-    setWorkerSection('discover');
-    showToast(
-      lang === 'kn' ? 'ಧ್ವನಿ ಹುಡುಕಾಟ ಅನ್ವಯಿಸಲಾಗಿದೆ' : 'Voice Filter Applied',
-      'Showing Mason Helper jobs near Kyathsandra'
-    );
+    setVoiceError(null);
+    setVoiceMicBlocked(false);
+
+    if (!sarvamConfigured) {
+      setVoiceError(
+        'Sarvam API key is not configured on the server yet. Add SARVAM_API_KEY in Secrets, or type your command below.'
+      );
+      return;
+    }
+
+    voiceMicSessionRef.current = startSarvamMicCapture({
+      maxDurationMs: 8500,
+      silenceDurationMs: 1500,
+      onStatusChange: (phase) => setVoiceSheetStatus(phase),
+      onAudioCaptured: async (blob) => {
+        setVoiceSheetStatus('transcribing');
+        const res = await transcribeAudioWithSarvam(blob, lang);
+        if (res.transcript) {
+          await handleVoiceCommandText(res.transcript);
+        } else {
+          setVoiceSheetStatus('idle');
+          setVoiceError(res.errorMessage || 'Could not understand audio. Please try speaking again.');
+        }
+      },
+      onError: (code, msg) => {
+        setVoiceSheetStatus('idle');
+        if (code === 'MIC_PERMISSION_DENIED') {
+          setVoiceMicBlocked(true);
+        }
+        setVoiceError(msg);
+      },
+    });
   };
 
-  const handleSimulateEmployerVoice = async () => {
-    setIsEmployerListening(true);
-    setEmployerParsedPreview(false);
-    setTimeout(async () => {
-      const res = await transcribeEmployerJobPost(lang);
-      setEmployerDraft(res.transcript);
-      setEmployerWage(res.entities.minWage);
-      setEmployerHeadcount(res.entities.headcount ?? 2);
-      setEmployerArea(res.entities.area);
-      setIsEmployerListening(false);
-      setEmployerParsedPreview(true);
-    }, 1500);
+  const startElevenLabsVoice = () => {
+    stopBrowserSpeech();
+    setVoiceError(null);
+    setVoiceMicBlocked(false);
+    setIsVoiceSheetOpen(true);
+    if (sarvamConfigured) {
+      startSarvamVoiceCapture();
+    }
+  };
+
+  const stopSarvamVoiceCapture = () => {
+    try {
+      voiceMicSessionRef.current?.stop();
+    } catch {
+      // Ignore
+    }
+  };
+
+  const handleCloseVoiceSheet = () => {
+    stopSarvamVoiceCapture();
+    stopBrowserSpeech();
+    setVoiceSheetStatus('idle');
+    setIsVoiceSheetOpen(false);
+  };
+
+  const handleSaveManualUser = async (params: {
+    name: string;
+    phone: string;
+    role: 'worker' | 'employer';
+    area?: string;
+    tradeOrBusiness?: string;
+    jobsCompleted?: number;
+    experience?: string;
+    expectedWage?: number;
+    paymentPreference?: string;
+  }) => {
+    const saved = await upsertUserAccount(params);
+    setCurrentUser(saved);
+    setRole(saved.role);
+    if (saved.role === 'worker') {
+      setWorkerSection('discover');
+    }
+    setIsOnboardingOpen(false);
+    showToast('Account Saved', `Signed in as ${saved.name} (${saved.role})`);
+  };
+
+  const handleSignOutUser = () => {
+    setStoredCurrentUser(null);
+    setCurrentUser(null);
   };
 
   const handleBroadcastJob = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!employerDraft.trim()) return;
 
-    const savedJob = await createJobInSupabase({
-      titleKannada: employerDraft,
-      titleHindi: employerDraft,
-      titleEnglish: `${employerDraft} (${employerHeadcount} needed)`,
-      category: 'Retail Shop',
+    const savedJob = await createJobRecord({
+      title: employerDraft.trim(),
+      area: employerArea,
       wage: Number(employerWage),
-      wageUnit: '/day',
-      shiftTime: 'Today · 2:00 PM – 7:00 PM',
-      slotsLeft: employerHeadcount,
-      location: employerArea,
-      areaTag: employerArea.split(',')[0],
-      distanceKm: 1.1,
-      commuteNote: '10 min walk',
-      pincode: '572101',
-      employer: 'Tumakuru Local Enterprise',
-      ownerName: 'Business Owner',
-      verifiedEmployer: true,
-      phone: employerPhone,
-      urgency: 'Immediate',
-      paymentMode: 'Evening UPI',
-      description: `Immediate requirement for ${employerHeadcount} workers in ${employerArea}.`,
-      descriptionKannada: `${employerArea} ಬಳಿ ${employerHeadcount} ಜನ ಕೆಲಸಗಾರರು ತಕ್ಷಣ ಬೇಕಾಗಿದ್ದಾರೆ. ದಿನಕ್ಕೆ ₹${employerWage}.`,
-      latLng: employerArea.includes('Kyathsandra')
-        ? [13.3106, 77.1636]
-        : employerArea.includes('APMC')
-        ? [13.3568, 77.0842]
-        : employerArea.includes('Vasanthnarasapura')
-        ? [13.4285, 77.0882]
-        : employerArea.includes('Chickpet')
-        ? [13.338, 77.1105]
-        : [13.3415, 77.1062],
+      workersCount: employerHeadcount,
+      employerName: currentUser?.name || 'Tumakuru Local Enterprise',
+      employerPhone: employerPhone || currentUser?.phone || '+91 98450 55443',
+      category: 'Retail Shop',
     });
 
-    setJobs((prev) => [savedJob, ...prev]);
+    setJobs((prev) => (prev.some((j) => j.id === savedJob.id) ? prev : [savedJob, ...prev]));
     setSelectedJobId(savedJob.id);
     setEmployerDraft('');
     setEmployerParsedPreview(false);
     confetti({ particleCount: 65, spread: 80, origin: { y: 0.7 } });
     showToast(
-      lang === 'kn' ? 'ಕೆಲಸ ಪ್ರಕಟಿಸಲಾಗಿದೆ' : 'Opening Published Live',
-      `Sent IVR & SMS alert to 18 nearby workers in ${employerArea}.`
+      lang === 'kn' ? 'ಕೆಲಸ ಪ್ರಕಟಿಸಲಾಗಿದೆ' : 'Instant Job Live',
+      `${savedJob.titleEnglish} · ${employerArea} (₹${employerWage}/day)`
     );
   };
 
@@ -247,7 +393,7 @@ export default function App() {
 
   const filteredJobs = jobs
     .filter((job) => {
-      const withinRadius = job.distanceKm <= radiusKm;
+      const withinRadius = voiceFilter ? true : job.distanceKm <= radiusKm;
       const matchesCat = selectedCategory === 'All' || job.category === selectedCategory;
       const matchesLoc = selectedLocality === 'all' || job.areaTag === selectedLocality;
       const q = searchQuery.trim().toLowerCase();
@@ -257,7 +403,8 @@ export default function App() {
         job.titleKannada.toLowerCase().includes(q) ||
         job.location.toLowerCase().includes(q) ||
         job.employer.toLowerCase().includes(q);
-      return withinRadius && matchesCat && matchesLoc && matchesQuery;
+      const matchesVoice = matchesVoiceFilter(job, voiceFilter);
+      return withinRadius && matchesCat && matchesLoc && matchesQuery && matchesVoice;
     })
     .sort((a, b) => {
       if (sortBy === 'highest') return b.wage - a.wage;
@@ -286,11 +433,12 @@ export default function App() {
             <button
               type="button"
               onClick={() => {
+                setShowAccountPanel(false);
                 setRole('worker');
                 setWorkerSection('discover');
               }}
               className={`py-1 border-b-2 transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
-                role === 'worker' && workerSection === 'discover'
+                !showAccountPanel && role === 'worker' && workerSection === 'discover'
                   ? 'border-[#EA580C] text-[#14171A] font-bold'
                   : 'border-transparent hover:text-[#14171A]'
               }`}
@@ -300,11 +448,12 @@ export default function App() {
             <button
               type="button"
               onClick={() => {
+                setShowAccountPanel(false);
                 setRole('worker');
                 setWorkerSection('shifts');
               }}
               className={`py-1 border-b-2 transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
-                role === 'worker' && workerSection === 'shifts'
+                !showAccountPanel && role === 'worker' && workerSection === 'shifts'
                   ? 'border-[#EA580C] text-[#14171A] font-bold'
                   : 'border-transparent hover:text-[#14171A]'
               }`}
@@ -315,9 +464,12 @@ export default function App() {
             </button>
             <button
               type="button"
-              onClick={() => setRole('employer')}
+              onClick={() => {
+                setShowAccountPanel(false);
+                setRole('employer');
+              }}
               className={`py-1 border-b-2 transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
-                role === 'employer'
+                !showAccountPanel && role === 'employer'
                   ? 'border-[#2563EB] text-[#14171A] font-bold'
                   : 'border-transparent hover:text-[#14171A]'
               }`}
@@ -326,9 +478,27 @@ export default function App() {
             </button>
           </nav>
 
-          {/* Zone 3: Locality Selector + Language Switcher */}
-          <div className="flex items-center gap-2.5 shrink-0">
-            <div className="hidden sm:flex items-center gap-1.5 text-xs font-semibold text-stone-700 bg-stone-100 px-2.5 py-1.5 rounded-xl border border-stone-200/80">
+          {/* Zone 3: Profile Pill + Locality Selector + Language Switcher */}
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={() => {
+                if (currentUser) {
+                  setShowAccountPanel(true);
+                } else {
+                  setIsOnboardingOpen(true);
+                }
+              }}
+              className="inline-flex items-center gap-1.5 min-h-[36px] px-2.5 py-1 rounded-xl border border-stone-200 bg-stone-100 hover:bg-stone-200/70 text-xs font-bold text-[#14171A] transition cursor-pointer max-w-[165px]"
+              title="Account & Role"
+            >
+              <User className={`w-3.5 h-3.5 shrink-0 ${currentUser?.role === 'employer' ? 'text-[#2563EB]' : 'text-[#EA580C]'}`} />
+              <span className="truncate">
+                {currentUser ? `${currentUser.name} · ${currentUser.role}` : 'Sign In'}
+              </span>
+            </button>
+
+            <div className="hidden lg:flex items-center gap-1.5 text-xs font-semibold text-stone-700 bg-stone-100 px-2.5 py-1.5 rounded-xl border border-stone-200/80">
               <MapPin className="w-3.5 h-3.5 text-[#EA580C] shrink-0" />
               <select
                 value={selectedLocality}
@@ -371,8 +541,36 @@ export default function App() {
 
       {/* ================= MAIN WORKSPACE ================= */}
       <main id="top" className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-5 sm:py-6 pb-28 space-y-6">
+        {/* ================= ACCOUNT PROFILE & REQUIREMENTS VIEW ================= */}
+        {showAccountPanel && (
+          <AccountProfileView
+            lang={lang}
+            currentUser={currentUser}
+            activeRole={role}
+            myShifts={myShifts}
+            postedJobsCount={jobs.filter((j) => currentUser?.name && j.employer === currentUser.name).length || 1}
+            invitedWorkersCount={invitedWorkerIds.length}
+            weeklyEarningsTotal={weeklyEarningsTotal}
+            onSaveAccount={handleSaveManualUser}
+            onVoiceUpdate={startElevenLabsVoice}
+            onNavigateWorkspace={(targetRole) => {
+              setShowAccountPanel(false);
+              setRole(targetRole);
+              if (targetRole === 'worker') {
+                setWorkerSection('discover');
+              }
+            }}
+            onSwitchAccount={() => {
+              handleSignOutUser();
+              setShowAccountPanel(false);
+              setIsOnboardingOpen(true);
+            }}
+            recentJobs={jobs}
+          />
+        )}
+
         {/* ================= WORKER MODE ================= */}
-        {role === 'worker' && workerSection === 'discover' && (
+        {!showAccountPanel && role === 'worker' && workerSection === 'discover' && (
           <>
             {/* Daily Duty & Quick Earnings Bar (Swiggy/Rapido Partner Pattern) */}
             <section className="bg-white rounded-2xl border border-stone-200/90 p-4 sm:px-6 shadow-xs flex flex-col lg:flex-row lg:items-center justify-between gap-4">
@@ -440,7 +638,7 @@ export default function App() {
                 <motion.button
                   type="button"
                   whileTap={{ scale: 0.95 }}
-                  onClick={handleOpenVoiceAssistant}
+                  onClick={startElevenLabsVoice}
                   className="min-h-[44px] px-4 bg-[#F59E0B] hover:bg-[#EA580C] hover:text-white text-[#14171A] font-extrabold text-xs sm:text-sm rounded-xl shadow-xs inline-flex items-center gap-2 whitespace-nowrap transition cursor-pointer"
                 >
                   <Mic className="w-4 h-4" />
@@ -507,6 +705,43 @@ export default function App() {
               </div>
             </div>
 
+            {/* Active Voice Filter Banner */}
+            {voiceFilter && (
+              <div className="bg-amber-50 border border-amber-200 rounded-2xl px-4 py-3 flex flex-wrap items-center justify-between gap-3">
+                <div className="flex flex-wrap items-center gap-2 text-xs">
+                  <span className="inline-flex items-center gap-1.5 font-extrabold text-[#EA580C]">
+                    <Mic className="w-3.5 h-3.5" />
+                    Voice Filter Active:
+                  </span>
+                  {voiceFilter.skill && (
+                    <span className="bg-white border border-amber-200 px-2.5 py-1 rounded-lg font-bold text-[#14171A]">
+                      Skill: {voiceFilter.skill}
+                    </span>
+                  )}
+                  {voiceFilter.area && (
+                    <span className="bg-white border border-amber-200 px-2.5 py-1 rounded-lg font-bold text-[#14171A]">
+                      Area: {voiceFilter.area}
+                    </span>
+                  )}
+                  {voiceFilter.minWage && (
+                    <span className="bg-white border border-amber-200 px-2.5 py-1 rounded-lg font-bold text-[#059669]">
+                      Min Wage: ₹{voiceFilter.minWage}
+                    </span>
+                  )}
+                  <span className="text-stone-600 font-semibold">
+                    ({filteredJobs.length} {filteredJobs.length === 1 ? 'match' : 'matches'})
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setVoiceFilter(null)}
+                  className="px-3 py-1.5 rounded-xl bg-[#14171A] text-white text-xs font-bold hover:bg-stone-800 transition cursor-pointer"
+                >
+                  Reset
+                </button>
+              </div>
+            )}
+
             {/* Split-Pane Marketplace: Left Job Feed + Right Sticky OpenStreetMap */}
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
               {/* Job Feed Column */}
@@ -527,6 +762,7 @@ export default function App() {
                           setSelectedCategory('All');
                           setSelectedLocality('all');
                           setSearchQuery('');
+                          setVoiceFilter(null);
                         }}
                         className="px-4 py-2.5 rounded-xl bg-[#14171A] text-white text-xs font-bold cursor-pointer"
                       >
@@ -676,7 +912,7 @@ export default function App() {
         )}
 
         {/* ================= WORKER MY SHIFTS & PASSBOOK ================= */}
-        {role === 'worker' && workerSection === 'shifts' && (
+        {!showAccountPanel && role === 'worker' && workerSection === 'shifts' && (
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
             {/* Active Shifts */}
             <section className="lg:col-span-7 bg-white rounded-3xl border border-stone-200/90 p-6 shadow-xs space-y-4">
@@ -788,7 +1024,7 @@ export default function App() {
         )}
 
         {/* ================= EMPLOYER MODE ================= */}
-        {role === 'employer' && (
+        {!showAccountPanel && role === 'employer' && (
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
             {/* Left: 15-Second Voice Job Poster */}
             <section className="lg:col-span-5 bg-white rounded-3xl p-6 border border-stone-200/90 shadow-xs space-y-5">
@@ -804,16 +1040,16 @@ export default function App() {
               <motion.button
                 type="button"
                 whileTap={{ scale: 0.97 }}
-                onClick={handleSimulateEmployerVoice}
+                onClick={startElevenLabsVoice}
                 className="w-full min-h-[48px] bg-[#F59E0B] hover:bg-[#EA580C] hover:text-white text-[#14171A] font-extrabold text-sm rounded-2xl shadow-xs flex items-center justify-center gap-2 transition cursor-pointer"
               >
-                <Mic className={`w-4 h-4 ${isEmployerListening ? 'animate-bounce' : ''}`} />
+                <Mic className={`w-4 h-4 ${voiceSheetStatus === 'listening' ? 'animate-pulse' : ''}`} />
                 <span>
-                  {isEmployerListening
-                    ? 'Listening to your requirement...'
+                  {voiceSheetStatus === 'listening'
+                    ? 'Listening — Speak Job Details'
                     : lang === 'kn'
                     ? 'ಮಾತನಾಡಿ ಕೆಲಸ ಪ್ರಕಟಿಸಿ'
-                    : 'Speak Job Requirement'}
+                    : 'Post Job by Voice (Sarvam AI)'}
                 </span>
               </motion.button>
 
@@ -1064,12 +1300,13 @@ export default function App() {
         <button
           type="button"
           onClick={() => {
+            setShowAccountPanel(false);
             setRole('worker');
             setWorkerSection('discover');
             setMobileDisplay('list');
           }}
           className={`flex flex-col items-center justify-center gap-0.5 text-[10px] font-bold ${
-            role === 'worker' && workerSection === 'discover' && mobileDisplay === 'list'
+            !showAccountPanel && role === 'worker' && workerSection === 'discover' && mobileDisplay === 'list'
               ? 'text-[#EA580C]'
               : 'text-stone-500'
           }`}
@@ -1081,12 +1318,13 @@ export default function App() {
         <button
           type="button"
           onClick={() => {
+            setShowAccountPanel(false);
             setRole('worker');
             setWorkerSection('discover');
             setMobileDisplay('map');
           }}
           className={`flex flex-col items-center justify-center gap-0.5 text-[10px] font-bold ${
-            role === 'worker' && mobileDisplay === 'map' ? 'text-[#EA580C]' : 'text-stone-500'
+            !showAccountPanel && role === 'worker' && mobileDisplay === 'map' ? 'text-[#EA580C]' : 'text-stone-500'
           }`}
         >
           <Navigation className="w-5 h-5" />
@@ -1096,11 +1334,12 @@ export default function App() {
         <button
           type="button"
           onClick={() => {
+            setShowAccountPanel(false);
             setRole('worker');
             setWorkerSection('shifts');
           }}
           className={`flex flex-col items-center justify-center gap-0.5 text-[10px] font-bold ${
-            role === 'worker' && workerSection === 'shifts' ? 'text-[#EA580C]' : 'text-stone-500'
+            !showAccountPanel && role === 'worker' && workerSection === 'shifts' ? 'text-[#EA580C]' : 'text-stone-500'
           }`}
         >
           <Wallet className="w-5 h-5" />
@@ -1109,13 +1348,17 @@ export default function App() {
 
         <button
           type="button"
-          onClick={() => setRole('employer')}
+          onClick={() => setShowAccountPanel(true)}
           className={`flex flex-col items-center justify-center gap-0.5 text-[10px] font-bold ${
-            role === 'employer' ? 'text-[#2563EB]' : 'text-stone-500'
+            showAccountPanel
+              ? currentUser?.role === 'employer' || role === 'employer'
+                ? 'text-[#2563EB]'
+                : 'text-[#EA580C]'
+              : 'text-stone-500'
           }`}
         >
-          <Building2 className="w-5 h-5" />
-          <span>Hire</span>
+          <User className="w-5 h-5" />
+          <span>{lang === 'kn' ? 'ಖಾತೆ' : 'Account'}</span>
         </button>
       </nav>
 
@@ -1124,7 +1367,7 @@ export default function App() {
         <motion.button
           type="button"
           whileTap={{ scale: 0.95 }}
-          onClick={role === 'worker' ? handleOpenVoiceAssistant : handleSimulateEmployerVoice}
+          onClick={startElevenLabsVoice}
           className="flex items-center gap-2.5 bg-[#14171A] hover:bg-stone-800 text-white pl-3 pr-5 py-2.5 rounded-full shadow-xl border border-stone-700 cursor-pointer transition"
         >
           <span className="w-9 h-9 rounded-full bg-gradient-to-br from-[#F59E0B] to-[#EA580C] flex items-center justify-center text-white">
@@ -1160,6 +1403,17 @@ export default function App() {
         )}
       </AnimatePresence>
 
+      {/* Onboarding & Account Modal */}
+      <OnboardingModal
+        isOpen={isOnboardingOpen}
+        lang={lang}
+        currentUser={currentUser}
+        sarvamConfigured={sarvamConfigured}
+        onClose={() => setIsOnboardingOpen(false)}
+        onSaveUser={handleSaveManualUser}
+        onSignOut={handleSignOutUser}
+      />
+
       {/* Shift Accept & Direct Owner Connect Sheet */}
       <JobConnectModal
         job={modalJob}
@@ -1169,117 +1423,22 @@ export default function App() {
         onConfirmShift={handleConfirmShift}
       />
 
-      {/* Voice Assistant Bottom Sheet */}
-      <AnimatePresence>
-        {isVoiceOpen && (
-          <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/55 backdrop-blur-sm p-0 sm:p-4">
-            <motion.div
-              initial={{ y: '100%', opacity: 0.6 }}
-              animate={{ y: 0, opacity: 1 }}
-              exit={{ y: '100%', opacity: 0 }}
-              transition={{ type: 'spring', damping: 28, stiffness: 320 }}
-              className="bg-white w-full sm:max-w-lg rounded-t-3xl sm:rounded-3xl p-6 shadow-2xl border border-stone-200"
-            >
-              <div className="w-10 h-1.5 bg-stone-300 rounded-full mx-auto mb-4 sm:hidden" />
-
-              <div className="flex items-center justify-between mb-4">
-                <div>
-                  <h3 className="text-base font-extrabold text-[#14171A]">
-                    {voicePhase === 'listening' && (lang === 'kn' ? 'ಕೇಳಿಸಿಕೊಳ್ಳುತ್ತಿದೆ...' : 'Listening...')}
-                    {voicePhase === 'processing' && 'Understanding Trade & Location...'}
-                    {voicePhase === 'matched' && (lang === 'kn' ? 'ಹೊಂದಾಣಿಕೆ ಸಿಕ್ಕಿದೆ!' : '3 Matching Shifts Found')}
-                  </h3>
-                  <p className="text-xs text-stone-500">Speak naturally in Kannada, Hindi, or English</p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    stopBrowserSpeech();
-                    setIsVoiceOpen(false);
-                  }}
-                  className="p-2 text-stone-400 hover:text-[#14171A]"
-                >
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
-
-              {voicePhase === 'listening' && (
-                <div className="my-8 flex items-center justify-center gap-1.5 h-14">
-                  {[35, 70, 95, 55, 85, 45, 90, 65, 40, 80].map((val, i) => (
-                    <motion.div
-                      key={i}
-                      animate={{ height: [`${val}%`, `${100 - val}%`, `${val}%`] }}
-                      transition={{ repeat: Infinity, duration: 0.75, delay: i * 0.08 }}
-                      className="w-2 rounded-full bg-[#EA580C]"
-                    />
-                  ))}
-                </div>
-              )}
-
-              {voicePhase !== 'listening' && voiceResult && (
-                <div className="space-y-3.5 my-4">
-                  <div className="bg-[#FAF8F5] border border-stone-200 rounded-2xl p-4">
-                    <p className="text-xs font-bold text-[#EA580C] mb-1">Transcript</p>
-                    <p className="text-sm font-bold text-[#14171A]">“{voiceResult.transcript}”</p>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-2.5 text-xs">
-                    <div className="bg-[#FAF8F5] p-3 rounded-xl border border-stone-200">
-                      <span className="text-stone-500 block text-[11px]">Skill</span>
-                      <strong className="text-[#14171A]">{voiceResult.entities.skill}</strong>
-                    </div>
-                    <div className="bg-[#FAF8F5] p-3 rounded-xl border border-stone-200">
-                      <span className="text-stone-500 block text-[11px]">Locality</span>
-                      <strong className="text-[#14171A]">
-                        {voiceResult.entities.area} ({voiceResult.entities.radiusKm} km)
-                      </strong>
-                    </div>
-                    <div className="bg-[#FAF8F5] p-3 rounded-xl border border-stone-200">
-                      <span className="text-stone-500 block text-[11px]">Min Pay</span>
-                      <strong className="text-[#059669] tabular-nums">₹{voiceResult.entities.minWage}/day</strong>
-                    </div>
-                    <div className="bg-[#FAF8F5] p-3 rounded-xl border border-stone-200">
-                      <span className="text-stone-500 block text-[11px]">Timing</span>
-                      <strong className="text-[#14171A]">{voiceResult.entities.timing}</strong>
-                    </div>
-                  </div>
-
-                  <div className="bg-[#14171A] text-white rounded-2xl p-3.5 flex items-center gap-3">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (isTtsPlaying) {
-                          stopBrowserSpeech();
-                          setIsTtsPlaying(false);
-                        } else {
-                          setIsTtsPlaying(true);
-                          speakTextWithBrowserFallback(voiceResult.ttsReply, lang);
-                        }
-                      }}
-                      className="w-9 h-9 rounded-xl bg-[#F59E0B] text-[#14171A] flex items-center justify-center shrink-0 cursor-pointer"
-                    >
-                      {isTtsPlaying ? <Square className="w-4 h-4" /> : <Play className="w-4 h-4" />}
-                    </button>
-                    <p className="text-xs text-stone-200 line-clamp-2">{voiceResult.ttsReply}</p>
-                  </div>
-                </div>
-              )}
-
-              <button
-                type="button"
-                onClick={voicePhase === 'matched' ? handleApplyVoiceFilters : () => setIsVoiceOpen(false)}
-                className="w-full mt-2 bg-[#14171A] hover:bg-stone-800 text-white font-extrabold text-sm py-3.5 rounded-2xl transition min-h-[48px] cursor-pointer"
-              >
-                {voicePhase === 'matched'
-                  ? lang === 'kn'
-                    ? 'ಹೊಂದಾಣಿಕೆಯಾದ ಕೆಲಸಗಳನ್ನು ತೋರಿಸಿ'
-                    : 'Filter Matching Shifts'
-                  : 'Cancel'}
-              </button>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
+      {/* Live Sarvam AI Voice Assistant Sheet */}
+      <ElevenLabsVoiceSheet
+        isOpen={isVoiceSheetOpen}
+        status={voiceSheetStatus}
+        sarvamConfigured={sarvamConfigured}
+        micBlocked={voiceMicBlocked}
+        lang={lang}
+        errorMsg={voiceError}
+        transcripts={transcripts}
+        onClose={handleCloseVoiceSheet}
+        onStartVoice={startSarvamVoiceCapture}
+        onStopVoice={stopSarvamVoiceCapture}
+        onSendText={(text) => {
+          handleVoiceCommandText(text);
+        }}
+      />
 
       {/* Architecture & API Slide-Over Drawer */}
       <AnimatePresence>
@@ -1308,38 +1467,37 @@ export default function App() {
                 </div>
 
                 <div className="space-y-3 text-xs text-stone-700">
-                  <p className="font-bold text-[#14171A]">End-to-End Pipeline</p>
+                  <p className="font-bold text-[#14171A]">End-to-End Live Pipeline</p>
                   <div className="bg-[#FAF8F5] p-4 rounded-2xl border border-stone-200 space-y-2 font-mono text-[11px]">
-                    <p>1. Browser Mic (WebAudio API)</p>
-                    <p>2. Sarvam AI saaras:v4 (Kannada / Hindi STT)</p>
-                    <p>3. Intent & Entity Extractor (Skill, Wage, Locality)</p>
-                    <p>4. PostGIS + Leaflet / OpenStreetMap Radius Match</p>
-                    <p>5. Sarvam AI bulbul:v4-flash (Regional Voice Reply)</p>
+                    <p>1. Sarvam AI Speech-to-Text (saaras:v4) via /api/sarvam/stt</p>
+                    <p>2. Sarvam AI Text-to-Speech (bulbul:v3) via /api/sarvam/tts</p>
+                    <p>3. Supabase Postgres + Realtime Sync (users & jobs)</p>
+                    <p>4. Leaflet + OpenStreetMap Tumakuru 5/10 km Radius</p>
                   </div>
                 </div>
 
                 <div className="space-y-3 text-xs">
                   <p className="font-bold text-[#14171A] flex items-center gap-1.5">
                     <Layers className="w-4 h-4 text-[#EA580C]" />
-                    Environment Integration Hooks
+                    Live Service Connections
                   </p>
                   <div className="bg-[#FAF8F5] p-4 rounded-2xl border border-stone-200 space-y-2">
                     <div className="flex justify-between">
-                      <span className="font-mono text-stone-600">VITE_SARVAM_API_KEY</span>
-                      <span className="font-bold text-amber-700">
-                        {isLiveVoiceConfigured() ? 'Connected' : 'Simulated Fallback'}
+                      <span className="font-mono text-stone-600">Sarvam AI Voice</span>
+                      <span className={`font-bold ${sarvamConfigured ? 'text-[#059669]' : 'text-stone-500'}`}>
+                        {sarvamConfigured ? 'Connected' : 'Add SARVAM_API_KEY'}
                       </span>
                     </div>
                     <div className="flex justify-between">
-                      <span className="font-mono text-stone-600">VITE_SUPABASE_URL</span>
-                      <span className="font-bold text-amber-700">
-                        {isLiveDatabaseConfigured() ? 'Connected' : 'Local Seed State'}
+                      <span className="font-mono text-stone-600">Supabase Realtime</span>
+                      <span className="font-bold text-[#059669]">
+                        {isSupabaseReady() ? 'Connected' : 'Local Fallback'}
                       </span>
                     </div>
                   </div>
                   <p className="text-[11px] text-stone-500 leading-relaxed">
-                    Isolated in <code className="bg-stone-100 px-1 rounded">src/services/voiceService.ts</code> and{' '}
-                    <code className="bg-stone-100 px-1 rounded">src/services/jobService.ts</code>.
+                    Server proxy keeps <code className="bg-stone-100 px-1 rounded">SARVAM_API_KEY</code> private in{' '}
+                    <code className="bg-stone-100 px-1 rounded">server.ts</code>.
                   </p>
                 </div>
               </div>

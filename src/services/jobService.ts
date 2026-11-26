@@ -80,11 +80,11 @@ function formatRelativeTime(isoDate?: string): string {
 }
 
 export const TUMAKURU_LOCALITIES = [
-  { id: 'all', label: 'All Tumakuru', kn: 'ಎಲ್ಲಾ ತುಮಕೂರು' },
+  { id: 'all', label: 'All Areas', kn: 'ಎಲ್ಲಾ ಪ್ರದೇಶಗಳು' },
   { id: 'B.H. Road', label: 'B.H. Road', kn: 'ಬಿ.ಹೆಚ್. ರಸ್ತೆ' },
   { id: 'Kyathsandra', label: 'Kyathsandra', kn: 'ಕ್ಯಾತ್ಸಂದ್ರ' },
   { id: 'APMC Yard', label: 'APMC Yard', kn: 'ಎಪಿಎಂಸಿ ಯಾರ್ಡ್' },
-  { id: 'Vasanthnarasapura', label: 'Vasanthnarasapura', kn: 'ವಸಂತನರಸಾಪುರ' },
+  { id: 'Vasanthnarasapura', label: 'Industrial Area', kn: 'ಕೈಗಾರಿಕಾ ಪ್ರದೇಶ' },
   { id: 'Chickpet', label: 'Chickpet', kn: 'ಚಿಕ್‌ಪೇಟೆ' },
 ];
 

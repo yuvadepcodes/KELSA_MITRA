@@ -86,27 +86,23 @@ export default function ElevenLabsVoiceSheet({
                 )}
               </div>
               <div>
-                <div className="flex items-center gap-2">
-                  <h3 className="text-base font-extrabold text-[#14171A]">
-                    {isTranscribing
-                      ? 'Transcribing with Sarvam AI...'
-                      : isListening
-                      ? lang === 'kn'
-                        ? 'ಕೇಳಿಸಿಕೊಳ್ಳುತ್ತಿದೆ (ಮಾತನಾಡಿ)...'
-                        : 'Listening — speak in Kannada, Hindi, or English'
-                      : isSpeaking
-                      ? lang === 'kn'
-                        ? 'ಸರ್ವಂ ಧ್ವನಿ ಉತ್ತರಿಸುತ್ತಿದೆ...'
-                        : 'Speaking reply...'
-                      : lang === 'kn'
-                      ? 'ಸರ್ವಂ ಧ್ವನಿ ಸಹಾಯಕ ಸಿದ್ಧವಾಗಿದೆ'
-                      : 'Sarvam Voice Assistant Ready'}
-                  </h3>
-                </div>
+                <h3 className="text-base font-extrabold text-[#14171A]">
+                  {isTranscribing
+                    ? 'Processing your voice...'
+                    : isListening
+                    ? lang === 'kn'
+                      ? 'ಕೇಳಿಸಿಕೊಳ್ಳುತ್ತಿದೆ (ಮಾತನಾಡಿ)...'
+                      : 'Listening — speak in Kannada, Hindi, or English'
+                    : isSpeaking
+                    ? lang === 'kn'
+                      ? 'ಧ್ವನಿ ಸಹಾಯಕ ಉತ್ತರಿಸುತ್ತಿದೆ...'
+                      : 'Speaking reply...'
+                    : lang === 'kn'
+                    ? 'ಧ್ವನಿ ಸಹಾಯಕ ಸಿದ್ಧವಾಗಿದೆ'
+                    : 'Voice Assistant Ready'}
+                </h3>
                 <p className="text-xs text-stone-500">
-                  {sarvamConfigured
-                    ? 'Sarvam AI (saaras:v4 + bulbul:v3) · Search or Post jobs'
-                    : 'Built-in fallback active · Add SARVAM_API_KEY in Secrets for Sarvam AI'}
+                  Speak naturally to search local shifts or post a job
                 </p>
               </div>
             </div>
@@ -121,7 +117,7 @@ export default function ElevenLabsVoiceSheet({
             </button>
           </div>
 
-          {/* Live Waveform Visualizer: Green when Sarvam configured, Grey when Built-in */}
+          {/* Live Waveform Visualizer */}
           <div
             className={`my-4 rounded-2xl p-4 flex flex-col items-center justify-center shrink-0 transition-colors ${
               sarvamConfigured ? 'bg-[#059669]' : 'bg-stone-600'
@@ -145,10 +141,8 @@ export default function ElevenLabsVoiceSheet({
             </div>
             <p className="text-[11px] font-semibold text-white/90 mt-2 text-center">
               {isListening
-                ? 'Speak naturally: “ಕ್ಯಾತ್ಸಂದ್ರ ಹತ್ತಿರ ಗೌಂಡಿ ಕೆಲಸ” or “Need 2 helpers for ₹700”'
-                : sarvamConfigured
-                ? 'Sarvam AI Voice Active · Tap below to speak'
-                : 'Built-in Fallback Mode · Type or tap below'}
+                ? 'Try saying: “ಗೌಂಡಿ ಕೆಲಸ ಬೇಕು” or “Need 2 helpers for ₹700”'
+                : 'Tap Speak Now below to search or post by voice'}
             </p>
           </div>
 
@@ -177,7 +171,7 @@ export default function ElevenLabsVoiceSheet({
           <div className="flex-1 overflow-y-auto space-y-2.5 min-h-[110px] max-h-52 pr-1 mb-4">
             {transcripts.length === 0 ? (
               <div className="text-center py-6 text-xs text-stone-400">
-                Speak or type in Kannada, Hindi, or English to search or post Tumakuru shifts.
+                Speak or type in Kannada, Hindi, or English to find nearby shifts or post an opening.
               </div>
             ) : (
               transcripts.map((entry) => (
@@ -199,13 +193,13 @@ export default function ElevenLabsVoiceSheet({
             )}
           </div>
 
-          {/* Text Command Input (always available alongside Voice) */}
+          {/* Text Command Input */}
           <form onSubmit={handleTextSubmit} className="flex items-center gap-2 mb-3 shrink-0">
             <input
               type="text"
               value={textInput}
               onChange={(e) => setTextInput(e.target.value)}
-              placeholder="Or type command (e.g. Mason near Kyathsandra ₹750)..."
+              placeholder="Or type command (e.g. Electrician near Chickpet ₹750)..."
               className="flex-1 min-h-[42px] px-3.5 bg-[#FAF8F5] border border-stone-200 rounded-xl text-xs font-medium focus:outline-none focus:ring-2 focus:ring-amber-500"
             />
             <button
@@ -240,8 +234,8 @@ export default function ElevenLabsVoiceSheet({
                   {isTranscribing
                     ? 'Processing...'
                     : lang === 'kn'
-                    ? 'ಮಾತನಾಡಿ (Speak with Sarvam)'
-                    : 'Speak with Sarvam AI'}
+                    ? 'ಮಾತನಾಡಿ (Speak Now)'
+                    : 'Speak Now'}
                 </span>
               </button>
             )}

@@ -14,6 +14,7 @@ import {
   Keyboard,
   ExternalLink,
   Loader2,
+  LogIn,
 } from 'lucide-react';
 import {
   SupportedLang,
@@ -25,7 +26,7 @@ import {
   transcribeAudioWithSarvam,
   stopBrowserSpeech,
 } from '../services/voiceService';
-import { UserAccount } from '../services/supabaseService';
+import { UserAccount, findUserByPhone } from '../services/supabaseService';
 
 interface OnboardingModalProps {
   isOpen: boolean;
@@ -40,6 +41,7 @@ interface OnboardingModalProps {
     area?: string;
     tradeOrBusiness?: string;
   }) => Promise<void>;
+  onExistingUserLogin: (user: UserAccount) => void;
   onSignOut: () => void;
 }
 
@@ -54,13 +56,17 @@ interface QaMessage {
 }
 
 const AREA_OPTIONS = [
-  { value: 'B.H. Road, Tumakuru', label: 'B.H. Road', kn: 'ಬಿ.ಹೆಚ್. ರೋಡ್' },
-  { value: 'Kyathsandra, Tumakuru', label: 'Kyathsandra', kn: 'ಕ್ಯಾತ್ಸಂದ್ರ' },
-  { value: 'APMC Yard, Tumakuru', label: 'APMC Yard', kn: 'ಎಪಿಎಂಸಿ ಯಾರ್ಡ್' },
-  { value: 'Vasanthnarasapura, Tumakuru', label: 'Vasanthnarasapura', kn: 'ವಸಂತನರಸಾಪುರ' },
-  { value: 'Chickpet, Tumakuru', label: 'Chickpet', kn: 'ಚಿಕ್ಕಪೇಟೆ' },
-  { value: 'Siddaganga Extn, Tumakuru', label: 'Siddaganga Extn', kn: 'ಸಿದ್ಧಗಂಗಾ' },
+  { value: 'B.H. Road', label: 'B.H. Road', kn: 'ಬಿ.ಹೆಚ್. ರೋಡ್' },
+  { value: 'Chickpet', label: 'Chickpet', kn: 'ಚಿಕ್ಕಪೇಟೆ' },
+  { value: 'Kyathsandra', label: 'Kyathsandra', kn: 'ಕ್ಯಾತ್ಸಂದ್ರ' },
+  { value: 'APMC Yard', label: 'APMC Yard', kn: 'ಎಪಿಎಂಸಿ ಯಾರ್ಡ್' },
+  { value: 'Industrial Area', label: 'Industrial Area', kn: 'ಕೈಗಾರಿಕಾ ಪ್ರದೇಶ' },
+  { value: 'Main Market', label: 'Main Market', kn: 'ಮುಖ್ಯ ಮಾರುಕಟ್ಟೆ' },
 ];
+
+function cleanTranscript(text: string): string {
+  return text.trim().replace(/[.。,]+$/g, '').trim();
+}
 
 function detectRoleFromSpeech(text: string): 'worker' | 'employer' | null {
   const t = text.toLowerCase();
@@ -120,23 +126,23 @@ function detectConfirmation(text: string): 'yes' | 'no' | null {
 
 function detectAreaFromSpeech(text: string): string | null {
   const t = text.toLowerCase();
+  if (t.includes('chickpet') || t.includes('ಚಿಕ್ಕಪೇಟ') || t.includes('ಚಿಕ್‌ಪೇಟ') || t.includes('चिकपेट')) {
+    return 'Chickpet';
+  }
   if (t.includes('kyath') || t.includes('ಕ್ಯಾತ್ಸಂದ್ರ') || t.includes('क्याथ')) {
-    return 'Kyathsandra, Tumakuru';
+    return 'Kyathsandra';
   }
-  if (t.includes('apmc') || t.includes('ಎಪಿಎಂಸಿ') || t.includes('ಮಾರ್ಕೆಟ್')) {
-    return 'APMC Yard, Tumakuru';
+  if (t.includes('apmc') || t.includes('ಎಪಿಎಂಸಿ') || t.includes('ಮಾರ್ಕೆಟ್') || t.includes('market')) {
+    return 'APMC Yard';
   }
-  if (t.includes('vasanth') || t.includes('ವಸಂತ') || t.includes('industrial')) {
-    return 'Vasanthnarasapura, Tumakuru';
-  }
-  if (t.includes('chickpet') || t.includes('ಚಿಕ್ಕಪೇಟೆ') || t.includes('चिकपेट')) {
-    return 'Chickpet, Tumakuru';
+  if (t.includes('vasanth') || t.includes('ವಸಂತ') || t.includes('industrial') || t.includes('ಕೈಗಾರಿಕಾ')) {
+    return 'Industrial Area';
   }
   if (t.includes('siddaganga') || t.includes('ಸಿದ್ಧಗಂಗಾ')) {
-    return 'Siddaganga Extn, Tumakuru';
+    return 'Siddaganga Extn';
   }
   if (t.includes('b.h') || t.includes('bh road') || t.includes('ಬಿ.ಹೆಚ್')) {
-    return 'B.H. Road, Tumakuru';
+    return 'B.H. Road';
   }
   return null;
 }
@@ -155,10 +161,12 @@ function getAgentScripts(lang: SupportedLang) {
       retryPhone: 'ಕ್ಷಮಿಸಿ, ಹತ್ತು ಅಂಕಿಯ ಸಂಖ್ಯೆ ಸರಿಯಾಗಿ ಕೇಳಿಸಲಿಲ್ಲ. ದಯವಿಟ್ಟು ಮತ್ತೊಮ್ಮೆ ಹೇಳಿ.',
       verifyPhone: (spacedDigits: string) =>
         `ನೀವು ಹೇಳಿದ ನಂಬರ್: ${spacedDigits}. ಇದು ಸರಿ ಇದೆಯೇ? ಹೌದು ಅಥವಾ ಇಲ್ಲ ಎಂದು ಹೇಳಿ.`,
+      welcomeBack: (n: string) =>
+        `ಮರಳಿ ಸ್ವಾಗತ ${n}! ನಿಮ್ಮ ಹಳೆಯ ಖಾತೆ ಸಿಕ್ಕಿದೆ, ಈಗ ಲಾಗಿನ್ ಆಗುತ್ತಿದ್ದೀರಿ.`,
       askDetails: (r: 'worker' | 'employer') =>
         r === 'employer'
-          ? 'ತುಂಬಾ ಒಳ್ಳೆಯದು! ನೀವು ತುಮಕೂರಿನ ಯಾವ ಏರಿಯಾದಲ್ಲಿ ಇದ್ದೀರಿ ಮತ್ತು ಯಾವ ವ್ಯಾಪಾರ ಮಾಡುತ್ತೀರಿ?'
-          : 'ತುಂಬಾ ಒಳ್ಳೆಯದು! ನೀವು ತುಮಕೂರಿನ ಯಾವ ಏರಿಯಾದಲ್ಲಿ ಇದ್ದೀರಿ ಮತ್ತು ಯಾವ ಕೆಲಸ ಮಾಡುತ್ತೀರಿ?',
+          ? 'ತುಂಬಾ ಒಳ್ಳೆಯದು! ನೀವು ಯಾವ ಏರಿಯಾದಲ್ಲಿ ಇದ್ದೀರಿ ಮತ್ತು ಯಾವ ವ್ಯಾಪಾರ ಮಾಡುತ್ತೀರಿ?'
+          : 'ತುಂಬಾ ಒಳ್ಳೆಯದು! ನೀವು ಯಾವ ಏರಿಯಾದಲ್ಲಿ ಇದ್ದೀರಿ ಮತ್ತು ಯಾವ ಕೆಲಸ ಮಾಡುತ್ತೀರಿ?',
       done: (n: string) => `ಧನ್ಯವಾದಗಳು ${n}! ನಿಮ್ಮ ಖಾತೆ ಈಗ ಸಿದ್ಧವಾಗಿದೆ.`,
     };
   }
@@ -175,10 +183,12 @@ function getAgentScripts(lang: SupportedLang) {
       retryPhone: 'माफ़ कीजिए, दस अंक पूरे नहीं मिले। कृपया नंबर फिर से बोलें।',
       verifyPhone: (spacedDigits: string) =>
         `आपका नंबर है: ${spacedDigits}। क्या यह सही है? हाँ या नहीं बोलें।`,
+      welcomeBack: (n: string) =>
+        `वापसी पर स्वागत है ${n}! आपका पुराना खाता मिल गया है, लॉगिन हो रहा है।`,
       askDetails: (r: 'worker' | 'employer') =>
         r === 'employer'
-          ? 'बहुत बढ़िया! आप तुमकुरु के किस इलाके में हैं और आपका कौन सा व्यवसाय है?'
-          : 'बहुत बढ़िया! आप तुमकुरु के किस इलाके में हैं और आप कौन सा काम करते हैं?',
+          ? 'बहुत बढ़िया! आप किस इलाके में हैं और आपका कौन सा व्यवसाय है?'
+          : 'बहुत बढ़िया! आप किस इलाके में हैं और आप कौन सा काम करते हैं?',
       done: (n: string) => `धन्यवाद ${n}! आपका खाता तैयार हो गया है।`,
     };
   }
@@ -187,17 +197,19 @@ function getAgentScripts(lang: SupportedLang) {
       'Namaskara! Welcome to KELSA Mitra. Are you looking for work, or hiring workers?',
     askName: (r: 'worker' | 'employer') =>
       r === 'employer'
-        ? 'Got it! What is your name or shop name?'
+        ? 'Got it! What is your name or business name?'
         : 'Great! What is your full name?',
     askPhone: (n: string) =>
       `Thanks ${n}! Now please tell me your 10-digit mobile number.`,
     retryPhone: 'Sorry, I did not catch all 10 digits. Please say your mobile number again.',
     verifyPhone: (spacedDigits: string) =>
       `I heard ${spacedDigits}. Is this number correct? Say Yes or No.`,
+    welcomeBack: (n: string) =>
+      `Welcome back, ${n}! Found your existing account and logging you in now.`,
     askDetails: (r: 'worker' | 'employer') =>
       r === 'employer'
-        ? 'Perfect! Which area in Tumakuru are you in, and what is your business?'
-        : 'Perfect! Which area in Tumakuru are you in, and what work do you do?',
+        ? 'Perfect! Which area are you in, and what is your business?'
+        : 'Perfect! Which area are you in, and what work do you do?',
     done: (n: string) => `Thank you ${n}! Your account is verified and ready.`,
   };
 }
@@ -209,19 +221,25 @@ export default function OnboardingModal({
   sarvamConfigured,
   onClose,
   onSaveUser,
+  onExistingUserLogin,
   onSignOut,
 }: OnboardingModalProps) {
   const [name, setName] = useState(currentUser?.name || '');
   const [phone, setPhone] = useState(currentUser?.phone || '');
   const [role, setRole] = useState<'worker' | 'employer'>(currentUser?.role || 'worker');
-  const [area, setArea] = useState(currentUser?.area || 'B.H. Road, Tumakuru');
+  const [area, setArea] = useState(currentUser?.area || 'B.H. Road');
   const [tradeOrBusiness, setTradeOrBusiness] = useState(currentUser?.tradeOrBusiness || '');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [micPermissionBlocked, setMicPermissionBlocked] = useState(false);
 
-  // Continuous Conversational Q&A mode vs Manual Form
-  const [mode, setMode] = useState<'qa' | 'manual'>('qa');
+  // Returning-user login state
+  const [loginPhone, setLoginPhone] = useState('');
+  const [loginBusy, setLoginBusy] = useState(false);
+  const [loginListening, setLoginListening] = useState(false);
+
+  // Continuous Conversational Q&A vs Existing User Login vs Manual Form
+  const [mode, setMode] = useState<'qa' | 'login' | 'manual'>('qa');
   const [qaStep, setQaStep] = useState<QaStep>('role');
   const [qaPhase, setQaPhase] = useState<QaPhase>('idle');
   const [qaMessages, setQaMessages] = useState<QaMessage[]>([]);
@@ -262,13 +280,13 @@ export default function OnboardingModal({
       setName(currentUser.name);
       setPhone(currentUser.phone);
       setRole(currentUser.role);
-      setArea(currentUser.area || 'B.H. Road, Tumakuru');
+      setArea((currentUser.area || 'B.H. Road').replace(/,\s*Tumakuru/gi, '').trim());
       setTradeOrBusiness(currentUser.tradeOrBusiness || '');
     } else {
       setName('');
       setPhone('');
       setRole('worker');
-      setArea('B.H. Road, Tumakuru');
+      setArea('B.H. Road');
       setTradeOrBusiness('');
     }
     setError('');
@@ -277,6 +295,8 @@ export default function OnboardingModal({
     setQaStep('role');
     setQaPhase('idle');
     setManualEntryValue('');
+    setLoginPhone('');
+    setLoginListening(false);
   }, [currentUser, isOpen]);
 
   useEffect(() => {
@@ -298,6 +318,7 @@ export default function OnboardingModal({
       // Ignore
     }
     browserRecRef.current = null;
+    setLoginListening(false);
   };
 
   useEffect(() => {
@@ -350,12 +371,6 @@ export default function OnboardingModal({
     setQaMessages((prev) =>
       prev.map((m) => (m.id === msgId ? { ...m, provider: result.provider } : m))
     );
-
-    if (result.warning === 'SARVAM_NOT_CONFIGURED') {
-      setError(
-        'Sarvam API key is not configured on the server yet — using Built-in Browser Voice fallback. Add SARVAM_API_KEY in Secrets to enable natural Kannada/Hindi/English Sarvam AI voice.'
-      );
-    }
 
     onDone();
   };
@@ -438,7 +453,6 @@ export default function OnboardingModal({
   const listenForAnswer = (onTranscript: (transcript: string) => void) => {
     if (cancelSignalRef.current.cancelled) return;
 
-    // If Sarvam API is NOT configured on server, go straight to browser SpeechRecognition fallback
     if (!sarvamConfiguredRef.current) {
       listenWithBrowserFallback(onTranscript);
       return;
@@ -463,13 +477,9 @@ export default function OnboardingModal({
           setActiveProvider('sarvam');
           pushMessage('user', res.transcript, 'sarvam');
           onTranscript(res.transcript);
-        } else if (res.errorCode === 'SARVAM_NOT_CONFIGURED') {
-          setActiveProvider('builtin');
-          setQaPhase('idle');
-          setError('Sarvam API key is not configured on the server. Add SARVAM_API_KEY in Secrets, or type/tap your answer above.');
         } else {
           setQaPhase('idle');
-          setError(res.errorMessage || 'Could not hear clearly. Tap Speak Answer and try again, or use the text box above.');
+          setError(res.errorMessage || 'Could not hear clearly. Tap Speak Answer and try again, or type below.');
         }
       },
       onError: (code, message) => {
@@ -483,7 +493,7 @@ export default function OnboardingModal({
     });
   };
 
-  // Continuous Step Handlers (Sarvam Bulbul speaks -> Sarvam Saaras listens -> auto-advances)
+  // Continuous Step Handlers
   const runRoleStep = () => {
     setQaStep('role');
     setError('');
@@ -521,7 +531,7 @@ export default function OnboardingModal({
   };
 
   const handleNameAnswer = (spokenName: string) => {
-    const clean = spokenName.trim();
+    const clean = cleanTranscript(spokenName);
     if (!clean) return;
     try {
       micSessionRef.current?.stop();
@@ -582,7 +592,7 @@ export default function OnboardingModal({
     });
   };
 
-  const handleConfirmPhone = (confirmed: boolean) => {
+  const handleConfirmPhone = async (confirmed: boolean) => {
     try {
       micSessionRef.current?.stop();
       browserRecRef.current?.stop();
@@ -593,6 +603,20 @@ export default function OnboardingModal({
       runPhoneStep(nameRef.current, true);
       return;
     }
+
+    // Check if an existing user already owns this phone number!
+    const existing = await findUserByPhone(phoneRef.current);
+    if (existing) {
+      setQaStep('saving');
+      setQaPhase('done');
+      const scripts = getAgentScripts(langRef.current);
+      onExistingUserLogin(existing);
+      await speakAndThen(scripts.welcomeBack(existing.name), () => {
+        setQaPhase('done');
+      });
+      return;
+    }
+
     runDetailsStep();
   };
 
@@ -614,11 +638,12 @@ export default function OnboardingModal({
     } catch {
       // Ignore
     }
-    const matchedArea = detectAreaFromSpeech(spokenDetails);
-    const finalArea = matchedArea || areaRef.current;
+    const cleanDetails = cleanTranscript(spokenDetails);
+    const matchedArea = detectAreaFromSpeech(cleanDetails);
+    const finalArea = matchedArea || areaRef.current || 'B.H. Road';
     const finalTrade =
-      spokenDetails.trim() ||
-      (roleRef.current === 'employer' ? 'Local Tumakuru Business' : 'Daily Shift Worker');
+      cleanDetails ||
+      (roleRef.current === 'employer' ? 'Local Business' : 'Daily Shift Worker');
 
     setArea(finalArea);
     setTradeOrBusiness(finalTrade);
@@ -633,7 +658,7 @@ export default function OnboardingModal({
     const scripts = getAgentScripts(langRef.current);
     try {
       await onSaveUser({
-        name: nameRef.current.trim() || 'Tumakuru User',
+        name: cleanTranscript(nameRef.current) || 'New User',
         phone: phoneRef.current,
         role: roleRef.current,
         area: finalArea,
@@ -707,6 +732,73 @@ export default function OnboardingModal({
     }
   };
 
+  const handleExistingLoginSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const digits = extractSpokenPhoneDigits(loginPhone);
+    if (digits.length !== 10) {
+      setError('Please enter or speak your 10-digit mobile number.');
+      return;
+    }
+    setError('');
+    setLoginBusy(true);
+    try {
+      const found = await findUserByPhone(digits);
+      if (found) {
+        onExistingUserLogin(found);
+      } else {
+        setPhone(digits);
+        setError('No existing account found for +91 ' + digits + '. Tap "Create New Account" below to register in seconds.');
+      }
+    } finally {
+      setLoginBusy(false);
+    }
+  };
+
+  const handleVoiceLoginSpeak = () => {
+    if (loginListening) {
+      try {
+        micSessionRef.current?.stop();
+      } catch {
+        // Ignore
+      }
+      setLoginListening(false);
+      return;
+    }
+    setError('');
+    setMicPermissionBlocked(false);
+    cancelSignalRef.current = { cancelled: false };
+    setLoginListening(true);
+
+    micSessionRef.current = startSarvamMicCapture({
+      maxDurationMs: 7000,
+      silenceDurationMs: 1400,
+      onAudioCaptured: async (blob) => {
+        setLoginListening(false);
+        setLoginBusy(true);
+        const res = await transcribeAudioWithSarvam(blob, langRef.current);
+        const digits = extractSpokenPhoneDigits(res.transcript || '');
+        if (digits.length === 10) {
+          setLoginPhone(digits);
+          const found = await findUserByPhone(digits);
+          if (found) {
+            onExistingUserLogin(found);
+          } else {
+            setPhone(digits);
+            setError('No existing account found for +91 ' + digits + '. Create a new account below.');
+          }
+        } else {
+          setError('Could not catch all 10 digits. Please type or speak your number clearly.');
+        }
+        setLoginBusy(false);
+      },
+      onError: (code, msg) => {
+        setLoginListening(false);
+        if (code === 'MIC_PERMISSION_DENIED') setMicPermissionBlocked(true);
+        setError(msg);
+      },
+    });
+  };
+
   const handleManualFormSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const digitsOnly = phone.replace(/\D/g, '');
@@ -723,13 +815,13 @@ export default function OnboardingModal({
     setSaving(true);
     try {
       await onSaveUser({
-        name: name.trim(),
+        name: cleanTranscript(name),
         phone: digitsOnly,
         role,
-        area,
+        area: area.trim() || 'B.H. Road',
         tradeOrBusiness:
           tradeOrBusiness.trim() ||
-          (role === 'employer' ? 'Local Tumakuru Business' : 'Daily Shift Worker'),
+          (role === 'employer' ? 'Local Business' : 'Daily Shift Worker'),
       });
     } finally {
       setSaving(false);
@@ -741,7 +833,7 @@ export default function OnboardingModal({
     onClose();
   };
 
-  const isSarvamActive = activeProvider === 'sarvam' && sarvamConfigured;
+  const isHdVoiceActive = activeProvider === 'sarvam' && sarvamConfigured;
 
   return (
     <AnimatePresence>
@@ -756,21 +848,27 @@ export default function OnboardingModal({
           <div className="w-10 h-1.5 bg-stone-300 rounded-full mx-auto mb-4 sm:hidden" />
 
           {/* Header */}
-          <div className="flex items-start justify-between gap-3 mb-4">
+          <div className="flex items-start justify-between gap-3 mb-3">
             <div>
               <h2 className="text-xl font-extrabold text-[#14171A] tracking-tight">
                 {currentUser
                   ? lang === 'kn'
                     ? 'ನಿಮ್ಮ ಖಾತೆ ವಿವರ'
                     : 'Your KELSAಮಿತ್ರ Account'
+                  : mode === 'login'
+                  ? lang === 'kn'
+                    ? 'ಹಳೆಯ ಖಾತೆಗೆ ಲಾಗಿನ್'
+                    : 'Log In to Existing Account'
                   : lang === 'kn'
                   ? 'ಮಾತನಾಡಿ ಖಾತೆ ತೆರೆಯಿರಿ'
-                  : 'Voice Sign In (Q&A)'}
+                  : 'Sign In (Voice Q&A)'}
               </h2>
               <p className="text-xs text-stone-500 mt-0.5">
                 {mode === 'qa'
-                  ? 'Guided Sarvam AI Kannada / Hindi / English Voice Q&A'
-                  : 'Quick manual entry for Tumakuru workers & employers.'}
+                  ? 'Guided voice sign-in in Kannada, Hindi, or English'
+                  : mode === 'login'
+                  ? 'Enter or speak your registered 10-digit mobile number'
+                  : 'Quick manual entry for workers & local businesses'}
               </p>
             </div>
 
@@ -784,13 +882,112 @@ export default function OnboardingModal({
             </button>
           </div>
 
-          {mode === 'qa' ? (
-            /* ================= CONTINUOUS SARVAM VOICE Q&A FLOW ================= */
+          {/* Clean 2-Way Switch: New Account vs Existing User Login */}
+          <div className="grid grid-cols-2 gap-1.5 bg-stone-100 p-1 rounded-xl mb-4 text-xs font-bold">
+            <button
+              type="button"
+              onClick={() => {
+                stopAllAudio();
+                setError('');
+                setMode('qa');
+              }}
+              className={`py-2 rounded-lg transition cursor-pointer ${
+                mode === 'qa' || mode === 'manual'
+                  ? 'bg-white text-[#14171A] shadow-xs'
+                  : 'text-stone-600 hover:text-[#14171A]'
+              }`}
+            >
+              New Account
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                stopAllAudio();
+                setError('');
+                setMode('login');
+              }}
+              className={`py-2 rounded-lg transition cursor-pointer inline-flex items-center justify-center gap-1.5 ${
+                mode === 'login'
+                  ? 'bg-white text-[#14171A] shadow-xs'
+                  : 'text-stone-600 hover:text-[#14171A]'
+              }`}
+            >
+              <LogIn className="w-3.5 h-3.5 text-[#059669]" />
+              <span>Existing Login</span>
+            </button>
+          </div>
+
+          {mode === 'login' ? (
+            /* ================= RETURNING USER 1-STEP PHONE LOGIN ================= */
+            <form onSubmit={handleExistingLoginSubmit} className="space-y-4">
+              <div className="bg-[#FAF8F5] border border-stone-200 rounded-2xl p-4 space-y-3">
+                <label className="block text-xs font-extrabold text-[#14171A]">
+                  Registered 10-Digit Mobile Number
+                </label>
+                <div className="flex items-center gap-2">
+                  <div className="relative flex-1">
+                    <Phone className="w-4 h-4 text-stone-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                    <input
+                      type="tel"
+                      inputMode="numeric"
+                      maxLength={10}
+                      value={loginPhone}
+                      onChange={(e) => setLoginPhone(e.target.value.replace(/\D/g, '').slice(0, 10))}
+                      placeholder="9845012345"
+                      className="w-full min-h-[46px] pl-10 pr-4 bg-white border border-stone-200 rounded-xl text-sm font-bold tabular-nums tracking-wide focus:outline-none focus:ring-2 focus:ring-amber-500"
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleVoiceLoginSpeak}
+                    className={`min-h-[46px] px-3.5 rounded-xl font-bold text-xs inline-flex items-center gap-1.5 cursor-pointer transition ${
+                      loginListening
+                        ? 'bg-rose-600 text-white animate-pulse'
+                        : 'bg-[#F59E0B] text-[#14171A] hover:bg-amber-400'
+                    }`}
+                    title="Speak your phone number"
+                  >
+                    <Mic className="w-4 h-4" />
+                    <span>{loginListening ? 'Stop' : 'Speak'}</span>
+                  </button>
+                </div>
+                <p className="text-[11px] text-stone-500">
+                  Your saved profile, role, jobs count, and requirements are restored automatically.
+                </p>
+              </div>
+
+              {error && (
+                <div className="text-xs font-bold text-rose-700 bg-rose-50 px-3.5 py-2.5 rounded-xl border border-rose-200 space-y-2">
+                  <p>{error}</p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setError('');
+                      setMode('manual');
+                    }}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#14171A] text-white text-[11px] font-extrabold cursor-pointer"
+                  >
+                    Create New Account with this Number →
+                  </button>
+                </div>
+              )}
+
+              <button
+                type="submit"
+                disabled={loginBusy}
+                className="w-full min-h-[48px] bg-[#14171A] hover:bg-stone-800 disabled:opacity-60 text-white font-extrabold text-sm rounded-2xl transition flex items-center justify-center gap-2 cursor-pointer"
+              >
+                <LogIn className="w-4 h-4 text-emerald-400" />
+                <span>{loginBusy ? 'Checking Account...' : 'Log In'}</span>
+              </button>
+            </form>
+          ) : mode === 'qa' ? (
+            /* ================= CONTINUOUS VOICE Q&A FLOW ================= */
             <div className="space-y-4">
-              {/* Top Rectangular Status Box: GREEN when Sarvam AI is active, GREY when Built-in Browser Voice */}
+              {/* Top Rectangular Status Box: GREEN when HD Voice is active, GREY when Standard Voice */}
               <div
                 className={`rounded-2xl p-4 space-y-3 text-white transition-colors border ${
-                  isSarvamActive
+                  isHdVoiceActive
                     ? 'bg-[#059669] border-emerald-400'
                     : 'bg-stone-600 border-stone-500'
                 }`}
@@ -803,7 +1000,7 @@ export default function OnboardingModal({
                           ? 'bg-[#EA580C] text-white animate-pulse'
                           : qaPhase === 'transcribing'
                           ? 'bg-amber-400 text-[#14171A]'
-                          : isSarvamActive
+                          : isHdVoiceActive
                           ? 'bg-emerald-900/50 text-white'
                           : qaPhase === 'speaking'
                           ? 'bg-stone-800 text-white'
@@ -822,23 +1019,21 @@ export default function OnboardingModal({
                       <div className="flex items-center gap-1.5 mb-0.5">
                         <span
                           className={`text-[10px] font-extrabold uppercase tracking-wider px-2 py-0.5 rounded-md ${
-                            isSarvamActive
+                            isHdVoiceActive
                               ? 'bg-emerald-900/60 text-emerald-100'
                               : 'bg-stone-800/80 text-stone-200'
                           }`}
                         >
-                          {isSarvamActive ? 'Sarvam AI (Bulbul + Saaras)' : 'Built-in Browser Voice'}
+                          {isHdVoiceActive ? 'HD Voice Active' : 'Standard Voice'}
                         </span>
                       </div>
                       <p className="text-xs font-extrabold">
                         {qaPhase === 'speaking'
-                          ? isSarvamActive
-                            ? 'Sarvam AI is speaking...'
-                            : 'Built-in voice is asking...'
+                          ? 'Voice assistant is speaking...'
                           : qaPhase === 'listening'
                           ? 'Listening — speak now (tap Done when finished)...'
                           : qaPhase === 'transcribing'
-                          ? 'Understanding your voice via Sarvam...'
+                          ? 'Processing your answer...'
                           : qaPhase === 'done'
                           ? 'Account Verified & Ready!'
                           : qaMessages.length === 0
@@ -933,7 +1128,7 @@ export default function OnboardingModal({
                               m.provider === 'sarvam' ? 'text-[#059669]' : 'text-stone-500'
                             }`}
                           >
-                            {m.provider === 'sarvam' ? 'Sarvam AI Voice' : 'Built-in Voice'}
+                            {m.provider === 'sarvam' ? 'HD Voice Assistant' : 'Standard Voice'}
                           </span>
                         )}
                         {m.text}
@@ -1077,7 +1272,7 @@ export default function OnboardingModal({
                     sarvamConfigured ? 'text-[#059669]' : 'text-stone-500'
                   }`}
                 >
-                  {sarvamConfigured ? 'Sarvam AI Active' : 'Sarvam Key Not Set'}
+                  {sarvamConfigured ? 'HD Voice Ready' : 'Standard Mode'}
                 </span>
               </div>
             </div>
@@ -1160,18 +1355,22 @@ export default function OnboardingModal({
 
               <div className="grid grid-cols-2 gap-2.5">
                 <div>
-                  <label className="block text-xs font-bold text-stone-700 mb-1">Tumakuru Area</label>
-                  <select
+                  <label className="block text-xs font-bold text-stone-700 mb-1">Work Area</label>
+                  <input
+                    type="text"
+                    list="onboarding-area-options"
                     value={area}
                     onChange={(e) => setArea(e.target.value)}
+                    placeholder="e.g. Chickpet"
                     className="w-full min-h-[42px] px-3 bg-[#FAF8F5] border border-stone-200 rounded-xl text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-amber-500 focus:bg-white"
-                  >
+                  />
+                  <datalist id="onboarding-area-options">
                     {AREA_OPTIONS.map((loc) => (
                       <option key={loc.value} value={loc.value}>
                         {lang === 'kn' ? loc.kn : loc.label}
                       </option>
                     ))}
-                  </select>
+                  </datalist>
                 </div>
 
                 <div>
@@ -1182,7 +1381,7 @@ export default function OnboardingModal({
                     type="text"
                     value={tradeOrBusiness}
                     onChange={(e) => setTradeOrBusiness(e.target.value)}
-                    placeholder={role === 'employer' ? 'Hardware Shop' : 'Mason / Loader'}
+                    placeholder={role === 'employer' ? 'Hardware Shop' : 'Mason / Electrician'}
                     className="w-full min-h-[42px] px-3 bg-[#FAF8F5] border border-stone-200 rounded-xl text-xs font-medium focus:outline-none focus:ring-2 focus:ring-amber-500 focus:bg-white"
                   />
                 </div>

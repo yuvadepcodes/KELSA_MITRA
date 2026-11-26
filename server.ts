@@ -163,16 +163,19 @@ async function createServer() {
         return;
       }
 
-      const ext = mimeType.includes('wav')
+      const cleanMime = (mimeType.split(';')[0] || 'audio/wav').trim().toLowerCase();
+      const ext = cleanMime.includes('wav')
         ? 'wav'
-        : mimeType.includes('mp4') || mimeType.includes('m4a')
+        : cleanMime.includes('mp4') || cleanMime.includes('m4a')
         ? 'm4a'
-        : mimeType.includes('ogg')
+        : cleanMime.includes('ogg')
         ? 'ogg'
+        : cleanMime.includes('mpeg') || cleanMime.includes('mp3')
+        ? 'mp3'
         : 'webm';
 
       const formData = new FormData();
-      const blob = new Blob([audioBuffer], { type: mimeType });
+      const blob = new Blob([audioBuffer], { type: cleanMime });
       formData.append('file', blob, `recording.${ext}`);
       formData.append('model', 'saaras:v4');
       formData.append('mode', 'transcribe');
@@ -203,9 +206,16 @@ async function createServer() {
 
       if (!sarvamRes.ok) {
         const errBody = await sarvamRes.text().catch(() => '');
+        let parsedMsg = errBody.slice(0, 200);
+        try {
+          const parsed = JSON.parse(errBody) as { error?: { message?: string }; message?: string; detail?: string };
+          parsedMsg = parsed?.error?.message || parsed?.message || parsed?.detail || parsedMsg;
+        } catch {
+          // keep text slice
+        }
         res.status(sarvamRes.status).json({
-          error: `Sarvam STT request failed (${sarvamRes.status})`,
-          detail: errBody.slice(0, 200),
+          error: `Sarvam STT request failed (${sarvamRes.status}): ${parsedMsg}`,
+          detail: parsedMsg,
         });
         return;
       }

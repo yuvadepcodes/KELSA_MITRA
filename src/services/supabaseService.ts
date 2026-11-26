@@ -9,11 +9,12 @@ export interface UserAccount {
   area?: string;
   tradeOrBusiness?: string;
   jobsCompleted?: number;
+  weeklyEarned?: number;
   experience?: string;
   expectedWage?: number;
   paymentPreference?: string;
   verified?: boolean;
-  rating?: number;
+  rating?: number | null;
   created_at?: string;
 }
 
@@ -53,7 +54,7 @@ function resolveAreaMeta(area: string): { latLng: [number, number]; distanceKm: 
       return { ...meta, areaTag: prettyTag };
     }
   }
-  return { latLng: [13.3392, 77.114], distanceKm: 2.5, commute: '12 min auto', areaTag: area || 'Tumakuru' };
+  return { latLng: [13.3392, 77.114], distanceKm: 2.5, commute: '12 min auto', areaTag: area || 'Local Area' };
 }
 
 function formatRelativeTime(isoDate?: string): string {
@@ -68,7 +69,7 @@ function formatRelativeTime(isoDate?: string): string {
 
 export function normalizeJobRow(row: Record<string, unknown>): Job {
   const titleText = String(row.title || row.title_english || row.title_kannada || 'Local Work Opportunity');
-  const areaText = String(row.area || row.location || 'Tumakuru');
+  const areaText = String(row.area || row.location || 'Local Area');
   const areaMeta = resolveAreaMeta(areaText);
   const workersCount = row.title
     ? Number(row.workers_count ?? row.slots_left ?? 1)
@@ -77,9 +78,9 @@ export function normalizeJobRow(row: Record<string, unknown>): Job {
   const rawEmpName = row.employer_name ? String(row.employer_name) : '';
   const legacyEmp = row.employer ? String(row.employer) : '';
   const employerName =
-    rawEmpName && rawEmpName !== 'Local Tumakuru Business'
+    rawEmpName && rawEmpName !== 'Local Tumakuru Business' && rawEmpName !== 'Local Business'
       ? rawEmpName
-      : legacyEmp || rawEmpName || 'Local Tumakuru Business';
+      : legacyEmp || rawEmpName || 'Local Business';
 
   const employerPhone = String(row.employer_phone || row.phone || '+91 98450 55443');
 
@@ -149,6 +150,59 @@ export function setStoredCurrentUser(user: UserAccount | null): void {
   }
 }
 
+export async function findUserByPhone(phone: string): Promise<UserAccount | null> {
+  const cleanPhone = phone.replace(/\D/g, '').slice(-10);
+  if (cleanPhone.length !== 10) return null;
+
+  let localMatch: UserAccount | undefined;
+  try {
+    const existingRaw = localStorage.getItem(STORAGE_USERS_KEY);
+    const existingList: UserAccount[] = existingRaw ? JSON.parse(existingRaw) : [];
+    localMatch = existingList.find((u) => u.phone === cleanPhone);
+  } catch {
+    localMatch = undefined;
+  }
+
+  if (supabase) {
+    try {
+      const { data, error } = await supabase
+        .from('users')
+        .select('*')
+        .eq('phone', cleanPhone)
+        .maybeSingle();
+
+      if (!error && data) {
+        const found: UserAccount = {
+          id: String(data.id),
+          name: String(data.name),
+          phone: String(data.phone),
+          role: data.role as 'worker' | 'employer',
+          area: localMatch?.area || 'B.H. Road',
+          tradeOrBusiness: localMatch?.tradeOrBusiness || '',
+          jobsCompleted: localMatch?.jobsCompleted ?? 0,
+          weeklyEarned: localMatch?.weeklyEarned ?? 0,
+          experience: localMatch?.experience || 'New',
+          expectedWage: localMatch?.expectedWage ?? 700,
+          paymentPreference: localMatch?.paymentPreference || 'Evening UPI',
+          verified: localMatch?.verified ?? true,
+          rating: localMatch?.rating ?? null,
+          created_at: String(data.created_at),
+        };
+        setStoredCurrentUser(found);
+        return found;
+      }
+    } catch {
+      // Fall back to local match
+    }
+  }
+
+  if (localMatch) {
+    setStoredCurrentUser(localMatch);
+    return localMatch;
+  }
+  return null;
+}
+
 export async function upsertUserAccount(params: {
   name: string;
   phone: string;
@@ -156,14 +210,15 @@ export async function upsertUserAccount(params: {
   area?: string;
   tradeOrBusiness?: string;
   jobsCompleted?: number;
+  weeklyEarned?: number;
   experience?: string;
   expectedWage?: number;
   paymentPreference?: string;
   verified?: boolean;
-  rating?: number;
+  rating?: number | null;
 }): Promise<UserAccount> {
   const cleanPhone = params.phone.replace(/\D/g, '').slice(-10) || params.phone.trim();
-  const cleanName = params.name.trim() || 'Tumakuru User';
+  const cleanName = params.name.trim().replace(/[.。,]+$/, '') || 'New User';
 
   let existingLocal: UserAccount | undefined;
   try {
@@ -174,21 +229,34 @@ export async function upsertUserAccount(params: {
     existingLocal = undefined;
   }
 
+  const resolvedJobsCompleted =
+    params.jobsCompleted !== undefined
+      ? params.jobsCompleted
+      : existingLocal?.jobsCompleted ?? 0;
+
   const mergedMeta = {
-    area: params.area ?? existingLocal?.area ?? 'B.H. Road, Tumakuru',
-    tradeOrBusiness: params.tradeOrBusiness ?? existingLocal?.tradeOrBusiness ?? '',
-    jobsCompleted:
-      params.jobsCompleted !== undefined
-        ? params.jobsCompleted
-        : existingLocal?.jobsCompleted ?? 0,
-    experience: params.experience ?? existingLocal?.experience ?? '2+ years',
+    area: (params.area ?? existingLocal?.area ?? 'B.H. Road').replace(/,\s*Tumakuru/gi, '').trim() || 'B.H. Road',
+    tradeOrBusiness: (params.tradeOrBusiness ?? existingLocal?.tradeOrBusiness ?? '').replace(/[.。,]+$/, ''),
+    jobsCompleted: resolvedJobsCompleted,
+    weeklyEarned:
+      params.weeklyEarned !== undefined
+        ? params.weeklyEarned
+        : existingLocal?.weeklyEarned ?? 0,
+    experience: params.experience ?? existingLocal?.experience ?? (resolvedJobsCompleted > 0 ? '2+ years' : 'New'),
     expectedWage:
       params.expectedWage !== undefined
         ? params.expectedWage
-        : existingLocal?.expectedWage ?? 750,
+        : existingLocal?.expectedWage ?? 700,
     paymentPreference: params.paymentPreference ?? existingLocal?.paymentPreference ?? 'Evening UPI',
     verified: params.verified ?? existingLocal?.verified ?? true,
-    rating: params.rating ?? existingLocal?.rating ?? 4.8,
+    rating:
+      params.rating !== undefined
+        ? params.rating
+        : existingLocal?.rating !== undefined
+        ? existingLocal.rating
+        : resolvedJobsCompleted > 0
+        ? 4.8
+        : null,
   };
 
   let savedUser: UserAccount = {
@@ -283,7 +351,7 @@ export async function createJobRecord(params: {
   category?: string;
 }): Promise<Job> {
   const areaMeta = resolveAreaMeta(params.area);
-  const employerName = params.employerName?.trim() || 'Local Tumakuru Business';
+  const employerName = params.employerName?.trim() || 'Local Business';
   const employerPhone = params.employerPhone?.trim() || '+91 98450 55443';
 
   let createdJob: Job = {

@@ -253,8 +253,8 @@ export default function App() {
         setSelectedJobId(filtered[0].id);
       }
       showToast(
-        lang === 'kn' ? 'ಧ್ವನಿ ಹುಡುಕಾಟ ಅನ್ವಯಿಸಲಾಗಿದೆ' : 'Sarvam Voice Applied',
-        `Found ${filtered.length} matching jobs in Tumakuru`
+        lang === 'kn' ? 'ಧ್ವನಿ ಹುಡುಕಾಟ ಅನ್ವಯಿಸಲಾಗಿದೆ' : 'Voice Filter Applied',
+        `Found ${filtered.length} matching jobs nearby`
       );
     }
 
@@ -274,7 +274,7 @@ export default function App() {
 
     if (!sarvamConfigured) {
       setVoiceError(
-        'Sarvam API key is not configured on the server yet. Add SARVAM_API_KEY in Secrets, or type your command below.'
+        'HD Voice is currently unavailable. Please type your command below.'
       );
       return;
     }
@@ -349,9 +349,20 @@ export default function App() {
     showToast('Account Saved', `Signed in as ${saved.name} (${saved.role})`);
   };
 
+  const handleExistingUserLogin = (existingUser: UserAccount) => {
+    setCurrentUser(existingUser);
+    setRole(existingUser.role);
+    if (existingUser.role === 'worker') {
+      setWorkerSection('discover');
+    }
+    setIsOnboardingOpen(false);
+    showToast('Welcome Back', `Signed in as ${existingUser.name} (${existingUser.role})`);
+  };
+
   const handleSignOutUser = () => {
     setStoredCurrentUser(null);
     setCurrentUser(null);
+    setMyShifts([]);
   };
 
   const handleBroadcastJob = async (e: React.FormEvent) => {
@@ -363,7 +374,7 @@ export default function App() {
       area: employerArea,
       wage: Number(employerWage),
       workersCount: employerHeadcount,
-      employerName: currentUser?.name || 'Tumakuru Local Enterprise',
+      employerName: currentUser?.name || 'Local Business',
       employerPhone: employerPhone || currentUser?.phone || '+91 98450 55443',
       category: 'Retail Shop',
     });
@@ -412,7 +423,7 @@ export default function App() {
       return a.distanceKm - b.distanceKm;
     });
 
-  const weeklyEarningsTotal = payouts.reduce((acc, p) => acc + p.amount, 0);
+  const weeklyEarningsTotal = currentUser?.weeklyEarned ?? 0;
 
   return (
     <div className="min-h-screen bg-[#FAF8F5] text-[#14171A] flex flex-col">
@@ -602,7 +613,7 @@ export default function App() {
                         : 'Paused Today'}
                     </span>
                     <span className="text-[11px] opacity-75 block mt-0.5">
-                      {onDutyToday ? 'Receiving Tumakuru owner calls' : 'Tap to receive local shift alerts'}
+                      {onDutyToday ? 'Receiving local owner calls' : 'Tap to receive local shift alerts'}
                     </span>
                   </div>
                 </button>
@@ -629,8 +640,8 @@ export default function App() {
                     onChange={(e) => setSearchQuery(e.target.value)}
                     placeholder={
                       lang === 'kn'
-                        ? 'ಕೆಲಸ ಅಥವಾ ಏರಿಯಾ ಹುಡುಕಿ (ಉದಾ: ಗೌಂಡಿ, ಕ್ಯಾತ್ಸಂದ್ರ)...'
-                        : 'Search trade or Tumakuru area (e.g., Mason, APMC)...'
+                        ? 'ಕೆಲಸ ಅಥವಾ ಏರಿಯಾ ಹುಡುಕಿ (ಉದಾ: ಗೌಂಡಿ, ಚಿಕ್ಕಪೇಟೆ)...'
+                        : 'Search trade or nearby area (e.g., Mason, Chickpet)...'
                     }
                     className="w-full min-h-[44px] pl-10 pr-4 bg-[#FAF8F5] border border-stone-200 rounded-xl text-sm font-medium placeholder:text-stone-400 focus:outline-none focus:ring-2 focus:ring-amber-500 focus:bg-white transition"
                   />
@@ -752,7 +763,7 @@ export default function App() {
                       No shifts match those filters within {radiusKm} km
                     </p>
                     <p className="text-xs text-stone-500">
-                      Expand your radius to 10 km or clear the trade filter to see all Tumakuru openings.
+                      Expand your radius to 10 km or clear the trade filter to see all nearby openings.
                     </p>
                     <div className="flex justify-center gap-2 pt-2">
                       <button
@@ -766,7 +777,7 @@ export default function App() {
                         }}
                         className="px-4 py-2.5 rounded-xl bg-[#14171A] text-white text-xs font-bold cursor-pointer"
                       >
-                        Show All Tumakuru Jobs (10 km)
+                        Show All Nearby Jobs (10 km)
                       </button>
                     </div>
                   </div>
@@ -1004,20 +1015,26 @@ export default function App() {
               </div>
 
               <div className="divide-y divide-stone-100">
-                {payouts.map((p) => (
-                  <div key={p.id} className="py-3 flex items-center justify-between gap-3">
-                    <div>
-                      <p className="text-xs font-extrabold text-[#14171A]">{p.employer}</p>
-                      <p className="text-[11px] text-stone-500">
-                        {p.role} · {p.date}
-                      </p>
+                {weeklyEarningsTotal === 0 && myShifts.length === 0 ? (
+                  <p className="text-xs text-stone-500 py-4 text-center">
+                    No settled payouts yet. Accept and complete a shift to track your UPI and cash settlements here.
+                  </p>
+                ) : (
+                  payouts.map((p) => (
+                    <div key={p.id} className="py-3 flex items-center justify-between gap-3">
+                      <div>
+                        <p className="text-xs font-extrabold text-[#14171A]">{p.employer}</p>
+                        <p className="text-[11px] text-stone-500">
+                          {p.role} · {p.date}
+                        </p>
+                      </div>
+                      <div className="text-right">
+                        <span className="text-sm font-extrabold text-[#059669] tabular-nums">+₹{p.amount}</span>
+                        <span className="block text-[10px] font-bold text-stone-500">{p.mode} Settled</span>
+                      </div>
                     </div>
-                    <div className="text-right">
-                      <span className="text-sm font-extrabold text-[#059669] tabular-nums">+₹{p.amount}</span>
-                      <span className="block text-[10px] font-bold text-stone-500">{p.mode} Settled</span>
-                    </div>
-                  </div>
-                ))}
+                  ))
+                )}
               </div>
             </section>
           </div>
@@ -1033,7 +1050,7 @@ export default function App() {
                   {lang === 'kn' ? '15 ಸೆಕೆಂಡಿನಲ್ಲಿ ಕೆಲಸಗಾರರನ್ನು ಕರೆಯಿರಿ' : 'Hire Local Help in 15 Seconds'}
                 </h2>
                 <p className="text-xs text-stone-500 mt-1">
-                  Speak in Kannada or pick a quick template to alert verified Tumakuru workers within 5 km.
+                  Speak in Kannada or pick a quick template to alert verified workers within 5 km.
                 </p>
               </div>
 
@@ -1049,7 +1066,7 @@ export default function App() {
                     ? 'Listening — Speak Job Details'
                     : lang === 'kn'
                     ? 'ಮಾತನಾಡಿ ಕೆಲಸ ಪ್ರಕಟಿಸಿ'
-                    : 'Post Job by Voice (Sarvam AI)'}
+                    : 'Post Job by Voice'}
                 </span>
               </motion.button>
 
@@ -1282,7 +1299,7 @@ export default function App() {
       <footer className="border-t border-stone-200 bg-white py-5 px-4 sm:px-6 mb-16 md:mb-0">
         <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-stone-500">
           <p>
-            <strong className="text-[#14171A]">KELSAಮಿತ್ರ</strong> · Tumakuru Town & Industrial Belt (5–10 km) · Zero-commission direct work network
+            <strong className="text-[#14171A]">KELSAಮಿತ್ರ</strong> · Hyper-Local Direct Work Network (5–10 km) · Zero-commission direct work
           </p>
           <button
             type="button"
@@ -1290,7 +1307,7 @@ export default function App() {
             className="text-xs font-semibold text-stone-600 hover:text-[#14171A] inline-flex items-center gap-1.5 underline underline-offset-4 cursor-pointer"
           >
             <Cpu className="w-3.5 h-3.5 text-[#2563EB]" />
-            <span>Voice & Geo API Architecture</span>
+            <span>Platform Architecture</span>
           </button>
         </div>
       </footer>
@@ -1411,6 +1428,7 @@ export default function App() {
         sarvamConfigured={sarvamConfigured}
         onClose={() => setIsOnboardingOpen(false)}
         onSaveUser={handleSaveManualUser}
+        onExistingUserLogin={handleExistingUserLogin}
         onSignOut={handleSignOutUser}
       />
 
@@ -1423,7 +1441,7 @@ export default function App() {
         onConfirmShift={handleConfirmShift}
       />
 
-      {/* Live Sarvam AI Voice Assistant Sheet */}
+      {/* Live Voice Assistant Sheet */}
       <ElevenLabsVoiceSheet
         isOpen={isVoiceSheetOpen}
         status={voiceSheetStatus}
@@ -1440,7 +1458,7 @@ export default function App() {
         }}
       />
 
-      {/* Architecture & API Slide-Over Drawer */}
+      {/* Architecture Slide-Over Drawer */}
       <AnimatePresence>
         {isArchOpen && (
           <div className="fixed inset-0 z-50 flex justify-end bg-black/55 backdrop-blur-sm">
@@ -1455,7 +1473,7 @@ export default function App() {
                 <div className="flex items-center justify-between border-b border-stone-200 pb-4">
                   <div className="flex items-center gap-2.5">
                     <Cpu className="w-5 h-5 text-[#2563EB]" />
-                    <h3 className="text-base font-extrabold text-[#14171A]">Voice & Geo API Architecture</h3>
+                    <h3 className="text-base font-extrabold text-[#14171A]">Platform Architecture</h3>
                   </div>
                   <button
                     type="button"
@@ -1469,36 +1487,32 @@ export default function App() {
                 <div className="space-y-3 text-xs text-stone-700">
                   <p className="font-bold text-[#14171A]">End-to-End Live Pipeline</p>
                   <div className="bg-[#FAF8F5] p-4 rounded-2xl border border-stone-200 space-y-2 font-mono text-[11px]">
-                    <p>1. Sarvam AI Speech-to-Text (saaras:v4) via /api/sarvam/stt</p>
-                    <p>2. Sarvam AI Text-to-Speech (bulbul:v3) via /api/sarvam/tts</p>
-                    <p>3. Supabase Postgres + Realtime Sync (users & jobs)</p>
-                    <p>4. Leaflet + OpenStreetMap Tumakuru 5/10 km Radius</p>
+                    <p>1. Multilingual Voice Recognition (Kannada, Hindi, English)</p>
+                    <p>2. Natural Neural Voice Response & Confirmation</p>
+                    <p>3. Cloud Database + Realtime Sync (users & jobs)</p>
+                    <p>4. Interactive Geo-Radius Matching (5 km / 10 km)</p>
                   </div>
                 </div>
 
                 <div className="space-y-3 text-xs">
                   <p className="font-bold text-[#14171A] flex items-center gap-1.5">
                     <Layers className="w-4 h-4 text-[#EA580C]" />
-                    Live Service Connections
+                    Live Service Status
                   </p>
                   <div className="bg-[#FAF8F5] p-4 rounded-2xl border border-stone-200 space-y-2">
                     <div className="flex justify-between">
-                      <span className="font-mono text-stone-600">Sarvam AI Voice</span>
+                      <span className="font-mono text-stone-600">HD Voice Engine</span>
                       <span className={`font-bold ${sarvamConfigured ? 'text-[#059669]' : 'text-stone-500'}`}>
-                        {sarvamConfigured ? 'Connected' : 'Add SARVAM_API_KEY'}
+                        {sarvamConfigured ? 'Connected' : 'Standard Mode'}
                       </span>
                     </div>
                     <div className="flex justify-between">
-                      <span className="font-mono text-stone-600">Supabase Realtime</span>
+                      <span className="font-mono text-stone-600">Realtime Database</span>
                       <span className="font-bold text-[#059669]">
                         {isSupabaseReady() ? 'Connected' : 'Local Fallback'}
                       </span>
                     </div>
                   </div>
-                  <p className="text-[11px] text-stone-500 leading-relaxed">
-                    Server proxy keeps <code className="bg-stone-100 px-1 rounded">SARVAM_API_KEY</code> private in{' '}
-                    <code className="bg-stone-100 px-1 rounded">server.ts</code>.
-                  </p>
                 </div>
               </div>
 

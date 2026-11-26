@@ -61,16 +61,15 @@ export default function AccountProfileView({
   const [role, setRole] = useState<'worker' | 'employer'>(currentUser?.role || activeRole);
   const [name, setName] = useState(currentUser?.name || '');
   const [phone, setPhone] = useState(currentUser?.phone || '');
-  const [area, setArea] = useState(currentUser?.area || 'B.H. Road, Tumakuru');
+  const [area, setArea] = useState(currentUser?.area || 'B.H. Road');
   const [tradeOrBusiness, setTradeOrBusiness] = useState(
-    currentUser?.tradeOrBusiness ||
-      (activeRole === 'employer' ? 'Hardware & Building Materials' : 'Mason Helper (Goundi)')
+    currentUser?.tradeOrBusiness || ''
   );
   const [jobsCompleted, setJobsCompleted] = useState<number>(
-    currentUser?.jobsCompleted ?? (activeRole === 'employer' ? postedJobsCount : 14)
+    currentUser?.jobsCompleted ?? (activeRole === 'employer' ? postedJobsCount : 0)
   );
-  const [experience, setExperience] = useState(currentUser?.experience || '3+ years');
-  const [expectedWage, setExpectedWage] = useState<number>(currentUser?.expectedWage ?? 750);
+  const [experience, setExperience] = useState(currentUser?.experience || 'New');
+  const [expectedWage, setExpectedWage] = useState<number>(currentUser?.expectedWage ?? 700);
   const [paymentPreference, setPaymentPreference] = useState(
     currentUser?.paymentPreference || 'Evening UPI'
   );
@@ -83,11 +82,8 @@ export default function AccountProfileView({
       setRole(currentUser.role);
       setName(currentUser.name);
       setPhone(currentUser.phone);
-      setArea(currentUser.area || 'B.H. Road, Tumakuru');
-      setTradeOrBusiness(
-        currentUser.tradeOrBusiness ||
-          (currentUser.role === 'employer' ? 'Local Tumakuru Business' : 'Mason Helper (Goundi)')
-      );
+      setArea((currentUser.area || 'B.H. Road').replace(/,\s*Tumakuru/gi, '').trim());
+      setTradeOrBusiness(currentUser.tradeOrBusiness || '');
       setJobsCompleted(
         currentUser.jobsCompleted !== undefined
           ? currentUser.jobsCompleted
@@ -95,18 +91,18 @@ export default function AccountProfileView({
           ? postedJobsCount
           : 0
       );
-      setExperience(currentUser.experience || '2+ years');
-      setExpectedWage(currentUser.expectedWage ?? 750);
+      setExperience(currentUser.experience || (currentUser.jobsCompleted ? '2+ years' : 'New'));
+      setExpectedWage(currentUser.expectedWage ?? 700);
       setPaymentPreference(currentUser.paymentPreference || 'Evening UPI');
     } else {
       setRole(activeRole);
       setName('');
       setPhone('');
-      setArea('B.H. Road, Tumakuru');
+      setArea('B.H. Road');
       setTradeOrBusiness('');
       setJobsCompleted(0);
-      setExperience('2+ years');
-      setExpectedWage(750);
+      setExperience('New');
+      setExpectedWage(700);
       setPaymentPreference('Evening UPI');
     }
   }, [currentUser, activeRole, postedJobsCount]);
@@ -115,6 +111,13 @@ export default function AccountProfileView({
     role === 'worker'
       ? Math.max(0, Number(jobsCompleted || 0)) + myShifts.length
       : Math.max(Number(jobsCompleted || 0), postedJobsCount);
+
+  const displayRating =
+    currentUser?.rating !== null && currentUser?.rating !== undefined
+      ? currentUser.rating
+      : totalJobsCount > 0
+      ? 4.8
+      : null;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -186,7 +189,7 @@ export default function AccountProfileView({
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-stone-500 mt-1">
                 <span className="inline-flex items-center gap-1 font-semibold text-[#059669]">
                   <ShieldCheck className="w-3.5 h-3.5" />
-                  Verified Tumakuru Account
+                  Verified Account
                 </span>
                 {currentUser?.phone && (
                   <span className="inline-flex items-center gap-1 tabular-nums">
@@ -254,10 +257,16 @@ export default function AccountProfileView({
 
           <div className="bg-[#FAF8F5] border border-stone-200/80 rounded-2xl p-3.5">
             <span className="text-[11px] font-semibold text-stone-500 block">Trust Rating</span>
-            <span className="text-xl sm:text-2xl font-extrabold text-[#14171A] tabular-nums mt-0.5 inline-flex items-center gap-1">
-              {currentUser?.rating ?? 4.8}
-              <Star className="w-4 h-4 fill-amber-400 text-amber-400" />
-            </span>
+            {displayRating !== null ? (
+              <span className="text-xl sm:text-2xl font-extrabold text-[#14171A] tabular-nums mt-0.5 inline-flex items-center gap-1">
+                {displayRating}
+                <Star className="w-4 h-4 fill-amber-400 text-amber-400" />
+              </span>
+            ) : (
+              <span className="text-base sm:text-lg font-extrabold text-stone-600 mt-1 block">
+                New <span className="text-[11px] font-medium text-stone-400">(No ratings yet)</span>
+              </span>
+            )}
           </div>
         </div>
       </section>
@@ -364,20 +373,24 @@ export default function AccountProfileView({
 
               <div>
                 <label className="block text-xs font-bold text-stone-700 mb-1">
-                  Tumakuru Locality
+                  Work Area / Locality
                 </label>
-                <select
+                <input
+                  type="text"
+                  list="kelsa-area-options"
                   value={area}
                   onChange={(e) => setArea(e.target.value)}
+                  placeholder="e.g. Chickpet, MG Road, Industrial Area"
                   className="w-full min-h-[44px] px-3.5 bg-[#FAF8F5] border border-stone-200 rounded-xl text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-amber-500 focus:bg-white"
-                >
-                  <option value="B.H. Road, Tumakuru">B.H. Road, Tumakuru</option>
-                  <option value="Kyathsandra, Tumakuru">Kyathsandra, Tumakuru</option>
-                  <option value="APMC Yard, Tumakuru">APMC Yard, Tumakuru</option>
-                  <option value="Vasanthnarasapura, Tumakuru">Vasanthnarasapura</option>
-                  <option value="Chickpet, Tumakuru">Chickpet, Tumakuru</option>
-                  <option value="Siddaganga Extn, Tumakuru">Siddaganga Extn</option>
-                </select>
+                />
+                <datalist id="kelsa-area-options">
+                  <option value="B.H. Road" />
+                  <option value="Chickpet" />
+                  <option value="APMC Yard" />
+                  <option value="Kyathsandra" />
+                  <option value="Industrial Area" />
+                  <option value="Main Market" />
+                </datalist>
               </div>
             </div>
 
@@ -475,7 +488,7 @@ export default function AccountProfileView({
           <div className="bg-white rounded-3xl border border-stone-200/90 p-5 shadow-xs space-y-3">
             <h3 className="text-sm font-extrabold text-[#14171A]">Quick Workspace Switch</h3>
             <p className="text-xs text-stone-500">
-              Jump directly to browse nearby Tumakuru shifts or post a job opening for workers.
+              Jump directly to browse nearby shifts or post a job opening for workers.
             </p>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-1 gap-2.5">
               <button
@@ -507,7 +520,7 @@ export default function AccountProfileView({
           <div className="bg-white rounded-3xl border border-stone-200/90 p-5 shadow-xs space-y-3">
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-extrabold text-[#14171A]">
-                {role === 'employer' ? 'Recent Tumakuru Openings' : 'Recent Confirmed Shifts'}
+                {role === 'employer' ? 'Recent Local Openings' : 'Recent Confirmed Shifts'}
               </h3>
               <Wallet className="w-4 h-4 text-[#059669]" />
             </div>

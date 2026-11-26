@@ -240,6 +240,68 @@ export interface MicRecordingSession {
   stop: () => void;
 }
 
+function downsampleTo16kHz(samples: Float32Array, sourceRate: number): Float32Array {
+  if (sourceRate === 16000) return samples;
+  const ratio = sourceRate / 16000;
+  const newLength = Math.max(1, Math.round(samples.length / ratio));
+  const result = new Float32Array(newLength);
+  for (let i = 0; i < newLength; i += 1) {
+    const pos = i * ratio;
+    const idx = Math.floor(pos);
+    const frac = pos - idx;
+    const s0 = samples[idx] ?? 0;
+    const s1 = samples[Math.min(idx + 1, samples.length - 1)] ?? s0;
+    result[i] = s0 + (s1 - s0) * frac;
+  }
+  return result;
+}
+
+function encodeMonoWav16kHz(chunks: Float32Array[], sourceRate: number): Blob {
+  let totalLen = 0;
+  for (const c of chunks) totalLen += c.length;
+  const merged = new Float32Array(totalLen);
+  let offset = 0;
+  for (const c of chunks) {
+    merged.set(c, offset);
+    offset += c.length;
+  }
+
+  const resampled = downsampleTo16kHz(merged, sourceRate);
+  const sampleRate = 16000;
+  const dataBytes = resampled.length * 2;
+  const buffer = new ArrayBuffer(44 + dataBytes);
+  const view = new DataView(buffer);
+
+  const writeStr = (pos: number, str: string) => {
+    for (let i = 0; i < str.length; i += 1) {
+      view.setUint8(pos + i, str.charCodeAt(i));
+    }
+  };
+
+  writeStr(0, 'RIFF');
+  view.setUint32(4, 36 + dataBytes, true);
+  writeStr(8, 'WAVE');
+  writeStr(12, 'fmt ');
+  view.setUint32(16, 16, true); // PCM chunk size
+  view.setUint16(20, 1, true); // PCM format
+  view.setUint16(22, 1, true); // mono
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * 2, true); // byte rate
+  view.setUint16(32, 2, true); // block align
+  view.setUint16(34, 16, true); // bits per sample
+  writeStr(36, 'data');
+  view.setUint32(40, dataBytes, true);
+
+  let writePos = 44;
+  for (let i = 0; i < resampled.length; i += 1) {
+    const s = Math.max(-1, Math.min(1, resampled[i]));
+    view.setInt16(writePos, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+    writePos += 2;
+  }
+
+  return new Blob([buffer], { type: 'audio/wav' });
+}
+
 export function startSarvamMicCapture(options: {
   maxDurationMs?: number;
   silenceDurationMs?: number;
@@ -252,20 +314,29 @@ export function startSarvamMicCapture(options: {
 
   let stopped = false;
   let stream: MediaStream | null = null;
-  let recorder: MediaRecorder | null = null;
   let audioCtx: AudioContext | null = null;
-  let rafId: number | null = null;
+  let processorNode: ScriptProcessorNode | null = null;
+  let sourceNode: MediaStreamAudioSourceNode | null = null;
+  let gainNode: GainNode | null = null;
   let maxTimer: number | null = null;
+  const pcmChunks: Float32Array[] = [];
+  let sourceSampleRate = 16000;
 
   const cleanup = () => {
-    if (rafId !== null) {
-      cancelAnimationFrame(rafId);
-      rafId = null;
-    }
     if (maxTimer !== null) {
       window.clearTimeout(maxTimer);
       maxTimer = null;
     }
+    try {
+      processorNode?.disconnect();
+      sourceNode?.disconnect();
+      gainNode?.disconnect();
+    } catch {
+      // Ignore
+    }
+    processorNode = null;
+    sourceNode = null;
+    gainNode = null;
     if (audioCtx) {
       audioCtx.close().catch(() => {});
       audioCtx = null;
@@ -279,100 +350,93 @@ export function startSarvamMicCapture(options: {
   const stopRecording = () => {
     if (stopped) return;
     stopped = true;
-    if (recorder && recorder.state === 'recording') {
-      options.onStatusChange?.('transcribing');
-      try {
-        recorder.stop();
-      } catch {
-        cleanup();
-      }
-    } else {
-      cleanup();
+    const chunksSnapshot = pcmChunks.slice();
+    const rateSnapshot = sourceSampleRate;
+    cleanup();
+
+    let totalSamples = 0;
+    for (const c of chunksSnapshot) totalSamples += c.length;
+
+    if (totalSamples < rateSnapshot * 0.25) {
+      options.onError('NO_SPEECH', 'No voice audio detected. Tap the mic and speak clearly.');
+      return;
     }
+
+    options.onStatusChange?.('transcribing');
+    const wavBlob = encodeMonoWav16kHz(chunksSnapshot, rateSnapshot);
+    options.onAudioCaptured(wavBlob);
   };
 
-  if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
-    options.onError('UNSUPPORTED', 'Audio recording is not supported in this browser.');
+  if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
+    options.onError('UNSUPPORTED', 'Microphone access is not supported in this browser.');
     return { stop: () => {} };
   }
 
   navigator.mediaDevices
-    .getUserMedia({ audio: true })
-    .then((mediaStream) => {
+    .getUserMedia({
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+      },
+    })
+    .then(async (mediaStream) => {
       if (stopped) {
         mediaStream.getTracks().forEach((t) => t.stop());
         return;
       }
       stream = mediaStream;
 
-      const preferredTypes = [
-        'audio/webm;codecs=opus',
-        'audio/webm',
-        'audio/ogg;codecs=opus',
-        'audio/mp4',
-      ];
-      const mimeType = preferredTypes.find((t) => MediaRecorder.isTypeSupported(t)) || '';
-      const chunks: BlobPart[] = [];
+      const AudioContextCtor =
+        window.AudioContext ||
+        (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
 
-      recorder = mimeType ? new MediaRecorder(mediaStream, { mimeType }) : new MediaRecorder(mediaStream);
-      recorder.ondataavailable = (ev) => {
-        if (ev.data && ev.data.size > 0) chunks.push(ev.data);
-      };
-      recorder.onstop = () => {
-        const finalBlob = new Blob(chunks, { type: recorder?.mimeType || mimeType || 'audio/webm' });
+      if (!AudioContextCtor) {
         cleanup();
-        if (finalBlob.size < 400) {
-          options.onError('NO_SPEECH', 'No voice audio detected. Tap the mic and speak clearly.');
-          return;
-        }
-        options.onAudioCaptured(finalBlob);
-      };
-      recorder.onerror = () => {
-        cleanup();
-        options.onError('RECORDER_ERROR', 'Microphone recording interrupted. Please try again.');
-      };
-
-      recorder.start(250);
-      options.onStatusChange?.('listening');
-
-      // Voice Activity + Silence Auto-Stop so users don't have to tap Stop
-      try {
-        const AudioContextCtor = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-        if (AudioContextCtor) {
-          audioCtx = new AudioContextCtor();
-          const source = audioCtx.createMediaStreamSource(mediaStream);
-          const analyser = audioCtx.createAnalyser();
-          analyser.fftSize = 512;
-          source.connect(analyser);
-          const dataArray = new Uint8Array(analyser.frequencyBinCount);
-          const startedAt = Date.now();
-          let heardVoice = false;
-          let lastVoiceAt = Date.now();
-
-          const checkLevel = () => {
-            if (stopped) return;
-            analyser.getByteTimeDomainData(dataArray);
-            let sum = 0;
-            for (let i = 0; i < dataArray.length; i += 1) {
-              const v = (dataArray[i] - 128) / 128;
-              sum += v * v;
-            }
-            const rms = Math.sqrt(sum / dataArray.length);
-            const now = Date.now();
-            if (rms > 0.025) {
-              heardVoice = true;
-              lastVoiceAt = now;
-            } else if (heardVoice && now - lastVoiceAt > silenceDurationMs && now - startedAt > 1400) {
-              stopRecording();
-              return;
-            }
-            rafId = requestAnimationFrame(checkLevel);
-          };
-          rafId = requestAnimationFrame(checkLevel);
-        }
-      } catch {
-        // Silence detection optional; maxDuration timer still protects
+        options.onError('UNSUPPORTED', 'Audio recording is not supported in this browser.');
+        return;
       }
+
+      audioCtx = new AudioContextCtor();
+      if (audioCtx.state === 'suspended') {
+        await audioCtx.resume().catch(() => {});
+      }
+      sourceSampleRate = audioCtx.sampleRate || 48000;
+
+      sourceNode = audioCtx.createMediaStreamSource(mediaStream);
+      processorNode = audioCtx.createScriptProcessor(4096, 1, 1);
+      gainNode = audioCtx.createGain();
+      gainNode.gain.value = 0;
+
+      const startedAt = Date.now();
+      let heardVoice = false;
+      let lastVoiceAt = Date.now();
+
+      processorNode.onaudioprocess = (ev) => {
+        if (stopped) return;
+        const input = ev.inputBuffer.getChannelData(0);
+        pcmChunks.push(new Float32Array(input));
+
+        let sum = 0;
+        for (let i = 0; i < input.length; i += 1) {
+          sum += input[i] * input[i];
+        }
+        const rms = Math.sqrt(sum / input.length);
+        const now = Date.now();
+
+        if (rms > 0.018) {
+          heardVoice = true;
+          lastVoiceAt = now;
+        } else if (heardVoice && now - lastVoiceAt > silenceDurationMs && now - startedAt > 1400) {
+          stopRecording();
+        }
+      };
+
+      sourceNode.connect(processorNode);
+      processorNode.connect(gainNode);
+      gainNode.connect(audioCtx.destination);
+
+      options.onStatusChange?.('listening');
 
       maxTimer = window.setTimeout(() => {
         stopRecording();

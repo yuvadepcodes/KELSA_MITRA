@@ -102,7 +102,7 @@ export default function TumakuruRadar({
       className: 'kelsa-center-pin',
       html: `<div style="display:flex;flex-direction:column;align-items:center;transform:translate(-50%,-50%);">
         <div style="width:12px;height:12px;border-radius:9999px;background:#2563EB;border:2.5px solid #FFFFFF;box-shadow:0 2px 6px rgba(0,0,0,0.35);"></div>
-        <span style="margin-top:3px;background:#14171A;color:#FFFFFF;font-size:10px;font-weight:700;padding:2px 6px;border-radius:6px;white-space:nowrap;">Tumakuru Bus Stand</span>
+        <span style="margin-top:3px;background:#14171A;color:#FFFFFF;font-size:10px;font-weight:700;padding:2px 6px;border-radius:6px;white-space:nowrap;">City Center</span>
       </div>`,
       iconSize: [0, 0],
     });
@@ -174,7 +174,7 @@ export default function TumakuruRadar({
       <div className="px-5 py-3.5 border-b border-stone-100 flex items-center justify-between gap-3">
         <div>
           <h3 className="text-sm font-extrabold text-[#14171A]">
-            {lang === 'kn' ? 'ತುಮಕೂರು ನಕ್ಷೆ' : lang === 'hi' ? 'तुमकुरु मानचित्र' : 'Tumakuru Live Map'}
+            {lang === 'kn' ? 'ನೇರ ನಕ್ಷೆ' : lang === 'hi' ? 'लाइव मानचित्र' : 'Live Area Map'}
           </h3>
           <p className="text-[11px] text-stone-500">
             {mode === 'jobs'
